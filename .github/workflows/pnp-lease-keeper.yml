@@ -1,0 +1,121 @@
+# Fork-only: keep a SINGLE claimed PEqualNP gap alive for a bounded session.
+# Never include this workflow in a PR to open-goat/pequalnp-proofs.
+name: PEqualNP lease keeper (bounded)
+
+on:
+  workflow_dispatch:
+    inputs:
+      assignment_run_id:
+        description: 'Run ID of the desk claim (e.g. 45421029420)'
+        required: true
+        type: string
+      duration_minutes:
+        description: 'Maximum session length (runner billed/consumed while active)'
+        required: true
+        type: choice
+        default: '60'
+        options:
+          - '30'
+          - '60'
+          - '90'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pnp-keeper-${{ inputs.assignment_run_id }}
+  cancel-in-progress: true
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - name: Validate the claim run ID
+        shell: bash
+        env:
+          ASSIGNMENT_RUN_ID: ${{ inputs.assignment_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$ASSIGNMENT_RUN_ID" =~ ^[1-9][0-9]{0,17}$ ]] || {
+            echo 'Expected a numeric claim workflow run ID' >&2
+            exit 1
+          }
+
+      - name: Download the original assignment
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.assignment_run_id }}
+          github-token: ${{ github.token }}
+          name: pnp-assignment-${{ inputs.assignment_run_id }}
+          path: .pnp-claim
+
+      - name: Renew lease every 8 minutes during this bounded session
+        shell: bash
+        env:
+          DURATION_MINUTES: ${{ inputs.duration_minutes }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import time
+          from datetime import datetime, timezone
+          from urllib.parse import urlencode
+
+          d = json.loads(Path('.pnp-claim/assignment.json').read_text(encoding='utf-8'))
+          gap, lease = d.get('gap'), d.get('lease')
+          if not isinstance(gap, dict) or not isinstance(gap.get('id'), str):
+              raise SystemExit('Claim artifact has no gap')
+          if not isinstance(lease, dict) or not isinstance(lease.get('id'), str) or not lease['id']:
+              raise SystemExit('Claim artifact has no lease')
+
+          try:
+              minutes = int(os.environ['DURATION_MINUTES'])
+          except (ValueError, KeyError):
+              raise SystemExit('Invalid session duration')
+          if minutes not in (30, 60, 90):
+              raise SystemExit('Session duration not allowed')
+
+          # Use monotonic time for a strict session bound.
+          finish_at = time.monotonic() + minutes * 60
+          interval_seconds = 8 * 60
+          print('Renewing gap:', gap['id'], flush=True)
+          print('Claim expiration as recorded:', lease.get('expires_at', 'unknown'), flush=True)
+          print('Session duration:', minutes, 'minutes', flush=True)
+
+          # Keep the lease value out of GitHub logs. CURL is used, as in tools/pnp.sh.
+          url = 'https://pequalnp.com/desk/beat?' + urlencode({'lease': lease['id']})
+          while True:
+              with tempfile.TemporaryDirectory() as tmp:
+                  response_file = str(Path(tmp) / 'reply.json')
+                  p = subprocess.run(
+                      ['curl', '--silent', '--show-error', '--proto', '=https',
+                       '--max-redirs', '0', '--connect-timeout', '15', '--max-time', '45',
+                       '--request', 'POST', '--output', response_file,
+                       '--write-out', '%{http_code}', url],
+                      text=True, capture_output=True)
+                  if p.returncode != 0:
+                      print('Renewal failed (curl exit code):', p.returncode, flush=True)
+                      raise SystemExit(1)
+                  code = p.stdout.strip()
+                  if code != '200':
+                      print('Renewal rejected by coordinator; HTTP status:', code, flush=True)
+                      raise SystemExit(1)
+                  try:
+                      updated = json.loads(Path(response_file).read_text(encoding='utf-8'))
+                      expiration = updated['lease']['expires_at']
+                  except (ValueError, KeyError, TypeError):
+                      print('Invalid coordinator response', flush=True)
+                      raise SystemExit(1)
+                  print('Lease renewed until:', expiration, flush=True)
+              remaining = finish_at - time.monotonic()
+              if remaining <= interval_seconds + 45:
+                  print('Session completed. Lease will expire without a further renewal.', flush=True)
+                  break
+              time.sleep(interval_seconds)
+          PY
