@@ -1,0 +1,191 @@
+# Fork only: claims one new PEqualNP gap and keeps it alive in a single GitHub job.
+# Never send this workflow to open-goat/pequalnp-proofs in a proof PR.
+name: PEqualNP claim + long research session
+
+on:
+  workflow_dispatch:
+    inputs:
+      difficulty:
+        description: 'Normal open step or deliberately hard step'
+        required: true
+        type: choice
+        default: normal
+        options:
+          - normal
+          - hard
+      duration_minutes:
+        description: 'Research window; runner limit is 360 min, desk lease max 6 hours'
+        required: true
+        type: choice
+        default: '345'
+        options:
+          - '60'
+          - '180'
+          - '345'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pnp-claim-long-${{ github.repository_owner }}
+  cancel-in-progress: false
+
+jobs:
+  claim-and-beat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Claim one step and generate the exact Lean skeleton
+        id: claim
+        shell: bash
+        env:
+          HANDLE: ${{ github.repository_owner }}
+          DIFFICULTY: ${{ inputs.difficulty }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess
+
+          handle = os.environ['HANDLE']
+          difficulty = os.environ['DIFFICULTY']
+          if not re.fullmatch(r'[A-Za-z0-9-]+', handle):
+              raise SystemExit('Invalid GitHub handle')
+          if difficulty not in ('normal', 'hard'):
+              raise SystemExit('Invalid difficulty')
+
+          secret_dir = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pnp-private'
+          public_dir = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pnp-public'
+          secret_dir.mkdir(parents=True, exist_ok=True)
+          public_dir.mkdir(parents=True, exist_ok=True)
+          claim_path = secret_dir / 'assignment.json'
+
+          args = ['curl', '--fail', '--silent', '--show-error', '--proto', '=https',
+                  '--max-redirs', '0', '--connect-timeout', '15', '--max-time', '45',
+                  '--get', '--data-urlencode', f'handle={handle}']
+          if difficulty == 'hard':
+              args += ['--data-urlencode', 'hard=1']
+          args += ['--output', str(claim_path), 'https://pequalnp.com/desk/next']
+          subprocess.run(args, check=True)
+          data = json.loads(claim_path.read_text(encoding='utf-8'))
+          gap = data.get('gap')
+          if not gap:
+              message = str(data.get('note') or data.get('error') or 'No assignment available')
+              print('No assignment:', message[:300])
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+                  out.write('## No new assignment\n\nThe desk returned no step; no lease was created.\n')
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+                  out.write('assigned=false\n')
+              raise SystemExit(0)
+          lease = data.get('lease')
+          if not isinstance(gap, dict) or not isinstance(lease, dict):
+              raise SystemExit('Malformed desk response')
+          gid, file, module, statement = (gap.get(k) for k in ('id','file','module','statement'))
+          if not isinstance(gid, str) or not re.fullmatch(r'L-[a-z]+-[0-9]+', gid):
+              raise SystemExit('Unexpected step ID')
+          if not isinstance(file, str) or not re.fullmatch(r'lean/PEqualNP/Outside/L_[a-z0-9_]+\.lean', file):
+              raise SystemExit('Unexpected Lean file path')
+          if not isinstance(module, str) or module != 'PEqualNP.Outside.' + pathlib.PurePosixPath(file).stem:
+              raise SystemExit('Unexpected Lean theorem name')
+          if not isinstance(statement, str) or not statement.strip() or '\x00' in statement:
+              raise SystemExit('Missing or malformed statement')
+          imports = gap.get('imports') or []
+          if not isinstance(imports, list) or not all(isinstance(s, str) and re.fullmatch(r'[A-Za-z0-9_.]+', s) for s in imports):
+              raise SystemExit('Unexpected import list')
+          if not isinstance(lease.get('id'), str) or not lease['id']:
+              raise SystemExit('Missing lease ID')
+
+          # Never place the bearer-like lease ID in the publicly downloadable artifact.
+          sanitized = {k: data[k] for k in ('gap', 'shard', 'shards') if k in data}
+          (public_dir / 'assignment.json').write_text(json.dumps(sanitized, indent=2, ensure_ascii=False), encoding='utf-8')
+          source = 'import Mathlib\n' + ''.join(f'import {imp}\n' for imp in imports if imp != 'Mathlib')
+          source += f'\ntheorem {module} : {statement} := by\n  sorry\n'
+          (public_dir / pathlib.PurePosixPath(file).name).write_text(source, encoding='utf-8')
+          print('Claimed:', gid)
+          print('Lean file:', file)
+          print('Original expiration:', lease.get('expires_at', 'unknown'))
+          print('Skeleton contains sorry: it is NOT a proof.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+              out.write(f'## Assigned step: `{gid}`\n\n')
+              out.write(f'Lean path: `{file}`\n\n')
+              out.write('Download the `pnp-new-step-*` artifact. It has the statement and skeleton, not the lease ID.\n\n')
+              out.write('No proof is generated or submitted automatically.\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('assigned=true\n')
+          PY
+
+      - name: Publish statement and skeleton while the session runs
+        if: steps.claim.outputs.assigned == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnp-new-step-${{ github.run_id }}
+          path: ${{ runner.temp }}/pnp-public/
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Renew for the chosen window, then release the step
+        if: steps.claim.outputs.assigned == 'true'
+        shell: bash
+        env:
+          DURATION_MINUTES: ${{ inputs.duration_minutes }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, tempfile, time
+          from urllib.parse import urlencode
+
+          p = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pnp-private' / 'assignment.json'
+          data = json.loads(p.read_text(encoding='utf-8'))
+          gap, lease = data['gap'], data['lease']
+          duration = int(os.environ['DURATION_MINUTES'])
+          if duration not in (60, 180, 345):
+              raise SystemExit('Unsupported session duration')
+          print('Session:', gap['id'], '| selected minutes:', duration, flush=True)
+          print('Lease is bounded by desk rules to six hours total.', flush=True)
+          deadline = time.monotonic() + duration * 60
+          lease_id = lease['id']
+
+          def post(endpoint, extra=None):
+              params = {'lease': lease_id}
+              if extra:
+                  params.update(extra)
+              # The private URL is deliberately never printed in logs.
+              url = 'https://pequalnp.com/desk/' + endpoint + '?' + urlencode(params)
+              with tempfile.TemporaryDirectory() as tmp:
+                  output = pathlib.Path(tmp) / 'response.json'
+                  result = subprocess.run(
+                      ['curl', '--silent', '--show-error', '--proto', '=https',
+                       '--max-redirs', '0', '--connect-timeout', '15', '--max-time', '40',
+                       '--request', 'POST', '--output', str(output),
+                       '--write-out', '%{http_code}', url],
+                      text=True, capture_output=True)
+                  if result.returncode != 0:
+                      print('curl network error code:', result.returncode, flush=True)
+                      raise SystemExit(1)
+                  return result.stdout.strip(), output.read_text(encoding='utf-8')
+
+          # Renew immediately and every 8 minutes. Don't leave a gap after claiming.
+          while True:
+              code, body = post('beat')
+              if code == '410':
+                  print('Desk returned 410: step settled, withdrawn or lease no longer valid. STOP.', flush=True)
+                  raise SystemExit(1)
+              if code != '200':
+                  print('Lease renewal failed; coordinator status:', code, flush=True)
+                  raise SystemExit(1)
+              try:
+                  expiration = json.loads(body)['lease']['expires_at']
+              except (KeyError, TypeError, ValueError):
+                  raise SystemExit('Renew response has no expiration')
+              print('Renewed until:', expiration, flush=True)
+              remaining = deadline - time.monotonic()
+              if remaining <= 0:
+                  break
+              time.sleep(min(8 * 60, remaining))
+
+          # The maximum desk lease is 6h. Release rather than hold a useless lock.
+          code, _ = post('release', {'reason': 'out_of_time'})
+          if not code.isdigit() or not (200 <= int(code) < 300):
+              print('Could not release; HTTP:', code, flush=True)
+              raise SystemExit(1)
+          print('Session finished. Step released (out_of_time). No proof submitted.', flush=True)
+          PY
