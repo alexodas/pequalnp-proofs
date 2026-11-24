@@ -1,0 +1,161 @@
+# Fork-only tool. Keep it out of pull requests to open-goat/pequalnp-proofs:
+# upstream accepts PRs adding exactly one Lean proof file.
+name: PEqualNP desk (preview or claim)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Preview open gaps (no lease), or claim one short-lived assignment'
+        type: choice
+        required: true
+        default: preview
+        options:
+          - preview
+          - claim
+          - claim-hard
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pnp-desk-${{ github.repository_owner }}
+  cancel-in-progress: false
+
+jobs:
+  desk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read public desk or request one assignment
+        id: desk
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pnp"
+          if [[ "$MODE" == preview ]]; then
+            curl --fail --silent --show-error --retry 2 --proto '=https' \
+              --max-redirs 0 --max-time 60 --max-filesize 5000000 \
+              --output "$RUNNER_TEMP/pnp/response.json" \
+              https://data.pequalnp.com/data/desk/gaps.json
+          else
+            # Query only when explicitly requested. The endpoint creates a live lease.
+            if [[ "$MODE" != claim && "$MODE" != claim-hard ]]; then
+              echo 'Invalid mode' >&2
+              exit 1
+            fi
+            if [[ ! "$OWNER" =~ ^[A-Za-z0-9-]+$ ]]; then
+              echo 'Invalid repository owner' >&2
+              exit 1
+            fi
+            extra=()
+            if [[ "$MODE" == claim-hard ]]; then extra=(--data-urlencode 'hard=1'); fi
+            # Do not automatically retry a claim: a lost response could leave a live lease.
+            curl --fail --silent --show-error --proto '=https' \
+              --max-redirs 0 --max-time 60 --max-filesize 5000000 \
+              --get --data-urlencode "handle=$OWNER" "${extra[@]}" \
+              --output "$RUNNER_TEMP/pnp/response.json" \
+              https://pequalnp.com/desk/next
+          fi
+
+          python3 - <<'PY'
+          import json, os, pathlib, re, sys
+
+          work = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pnp'
+          summary = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
+          output = pathlib.Path(os.environ['GITHUB_OUTPUT'])
+          mode = os.environ['MODE']
+          with (work / 'response.json').open(encoding='utf-8') as f:
+              data = json.load(f)
+          if not isinstance(data, dict):
+              raise ValueError('Desk response must be a JSON object')
+
+          if mode == 'preview':
+              gaps = data.get('gaps')
+              if not isinstance(gaps, list):
+                  raise ValueError('Public desk list has no gaps array')
+              checked = data.get('checked', [])
+              print(f'Open desk rows: {len(gaps)}')
+              print(f'Checked rows: {len(checked) if isinstance(checked, list) else "unknown"}')
+              lines = [
+                  '## PEqualNP: public desk preview',
+                  f'Open gaps: **{len(gaps)}** (not reserved)',
+                  f'Checked: **{len(checked)}**' if isinstance(checked, list) else '',
+                  '',
+                  'First 10 open gaps:',
+              ]
+              for row in gaps[:10]:
+                  if not isinstance(row, dict):
+                      continue
+                  ident = re.sub(r'[^A-Za-z0-9_-]', '', str(row.get('id', '')))[:80]
+                  kind = re.sub(r'[^A-Za-z0-9_-]', '', str(row.get('kind', 'check')))[:30]
+                  title = re.sub(r'[\r\n|`]', ' ', str(row.get('title', '')))[:120]
+                  lines.append(f'- `{ident}` ({kind}) {title}')
+              lines += ['', 'No lease was requested. To take a real step, rerun with mode `claim`.']
+              with summary.open('a', encoding='utf-8') as f:
+                  f.write('\n'.join(lines) + '\n')
+              with output.open('a', encoding='utf-8') as f:
+                  f.write('has_gap=false\n')
+              sys.exit(0)
+
+          gap = data.get('gap')
+          if not gap:
+              print('No step assigned:', str(data.get('note') or data.get('error') or 'Desk currently has none'))
+              with summary.open('a', encoding='utf-8') as f:
+                  f.write('## PEqualNP: no gap assigned\n\nThe desk returned no gap. Try again later.\n')
+              with output.open('a', encoding='utf-8') as f:
+                  f.write('has_gap=false\n')
+              sys.exit(0)
+          if not isinstance(gap, dict) or not isinstance(data.get('lease'), dict):
+              raise ValueError('Malformed gap or missing lease')
+          gid, path, module, statement = (gap.get(k) for k in ('id', 'file', 'module', 'statement'))
+          if not isinstance(gid, str) or not re.fullmatch(r'L-[a-z]+-[0-9]+', gid):
+              raise ValueError('Invalid gap identifier')
+          if not isinstance(path, str) or not re.fullmatch(r'lean/PEqualNP/Outside/L_[a-z0-9_]+\.lean', path):
+              raise ValueError('Invalid proof file path')
+          if not isinstance(module, str) or module != 'PEqualNP.Outside.' + pathlib.PurePosixPath(path).stem:
+              raise ValueError('Invalid module name')
+          if not isinstance(statement, str) or not statement.strip() or '\x00' in statement:
+              raise ValueError('Invalid statement')
+          imports = gap.get('imports') or []
+          if not isinstance(imports, list) or not all(isinstance(x, str) and re.fullmatch(r'[A-Za-z0-9_.]+', x) for x in imports):
+              raise ValueError('Invalid import list')
+          lease = data['lease']
+          if not isinstance(lease.get('id'), str) or not lease['id']:
+              raise ValueError('Missing lease id')
+
+          source = 'import Mathlib\n' + ''.join(f'import {x}\n' for x in imports if x != 'Mathlib')
+          source += f'\ntheorem {module} : {statement} := by\n  sorry\n'
+          proof = work / pathlib.PurePosixPath(path).name
+          proof.write_text(source, encoding='utf-8')
+          (work / 'assignment.json').write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+          # The opaque lease identifier is deliberately NOT printed to public run logs.
+          print(f'Assigned {gid}: {gap.get("title", "")}')
+          print(f'File: {path}')
+          print(f'Module: {module}')
+          print(f'Lease expires: {lease.get("expires_at", "unknown")}')
+          print(f'Statement:\n{statement}')
+          with summary.open('a', encoding='utf-8') as f:
+              f.write(f'## Assigned PEqualNP step: `{gid}`\n\n')
+              f.write(f'Proof path: `{path}`\n\n')
+              f.write(f'Lease expiration: `{lease.get("expires_at", "unknown")}`\n\n')
+              f.write('Download the short-lived `pnp-assignment` artifact below for the full context and Lean skeleton. '
+                      'The skeleton contains `sorry` and is **not** a proof. '
+                      'Renew every 10 minutes while working; do not publish a PR without verification.\n')
+          with output.open('a', encoding='utf-8') as f:
+              f.write('has_gap=true\n')
+          PY
+
+      - name: Save assigned gap and Lean skeleton (short-lived artifact)
+        if: steps.desk.outputs.has_gap == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnp-assignment-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/pnp/assignment.json
+            ${{ runner.temp }}/pnp/L_*.lean
+          if-no-files-found: error
+          retention-days: 1
