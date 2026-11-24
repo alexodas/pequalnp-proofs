@@ -1,0 +1,116 @@
+# Fork-only lease management for a gap obtained by pnp-desk.yml.
+# This workflow does not submit a proof and must not be included in upstream PRs.
+name: PEqualNP lease control
+
+on:
+  workflow_dispatch:
+    inputs:
+      assignment_run_id:
+        description: 'Run ID of the successful PEqualNP desk claim (e.g. 45421029420)'
+        required: true
+        type: string
+      operation:
+        description: 'Renew a live lease or release it back to the desk'
+        required: true
+        type: choice
+        default: renew
+        options:
+          - renew
+          - release
+      release_reason:
+        description: 'Used only when operation is release'
+        required: false
+        type: choice
+        default: out_of_time
+        options:
+          - out_of_time
+          - statement_seems_false
+          - hypothesis_too_weak
+          - does_not_elaborate
+          - missing_lemma
+          - other
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pnp-lease-${{ inputs.assignment_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate the claim run ID
+        shell: bash
+        env:
+          ASSIGNMENT_RUN_ID: ${{ inputs.assignment_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$ASSIGNMENT_RUN_ID" =~ ^[1-9][0-9]{0,17}$ ]]; then
+            echo 'Invalid run ID; expected digits only' >&2
+            exit 1
+          fi
+
+      - name: Download the claim artifact from its original run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.assignment_run_id }}
+          github-token: ${{ github.token }}
+          name: pnp-assignment-${{ inputs.assignment_run_id }}
+          path: .pnp-claim
+
+      - name: Renew or release the assigned gap
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_REASON: ${{ inputs.release_reason }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          data = json.loads(Path('.pnp-claim/assignment.json').read_text(encoding='utf-8'))
+          lease = data.get('lease')
+          gap = data.get('gap')
+          if not isinstance(lease, dict) or not isinstance(lease.get('id'), str) or not lease['id']:
+              raise ValueError('Claim artifact has no lease ID')
+          if not isinstance(gap, dict) or not isinstance(gap.get('id'), str):
+              raise ValueError('Claim artifact has no gap ID')
+
+          operation = os.environ['OPERATION']
+          if operation not in ('renew', 'release'):
+              raise ValueError('Unexpected operation')
+
+          params = {'lease': lease['id']}
+          if operation == 'renew':
+              endpoint = 'beat'
+          else:
+              endpoint = 'release'
+              reason = os.environ['RELEASE_REASON']
+              if reason not in ('out_of_time', 'statement_seems_false', 'hypothesis_too_weak',
+                                'does_not_elaborate', 'missing_lemma', 'other'):
+                  raise ValueError('Unexpected release reason')
+              params['reason'] = reason
+
+          request = Request('https://pequalnp.com/desk/' + endpoint + '?' + urlencode(params),
+                            data=b'', method='POST')
+          # No credentials are printed and the lease ID is never written to logs.
+          with urlopen(request, timeout=40) as resp:
+              body = resp.read(8192)
+          print('Gap:', gap['id'])
+          if operation == 'release':
+              print('Release request accepted by HTTP endpoint; reason:', params['reason'])
+          else:
+              result = json.loads(body)
+              next_lease = result.get('lease') if isinstance(result, dict) else None
+              if not isinstance(next_lease, dict) or not next_lease.get('expires_at'):
+                  raise ValueError('Renewal response lacked an updated expiration')
+              print('Lease renewed. New expiration:', next_lease['expires_at'])
+          PY
