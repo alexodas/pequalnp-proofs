@@ -1,0 +1,132 @@
+# Fork-only workflow. NEVER include this file in PRs to open-goat/pequalnp-proofs.
+# Unlike the original lease workflow, this uses curl (as tools/pnp.sh does).
+name: PEqualNP lease control v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      assignment_run_id:
+        description: 'Run ID of the successful PEqualNP desk claim'
+        required: true
+        type: string
+      operation:
+        description: 'Renew a live lease or release it'
+        required: true
+        type: choice
+        default: renew
+        options:
+          - renew
+          - release
+      release_reason:
+        description: 'Used only when operation is release'
+        required: false
+        type: choice
+        default: out_of_time
+        options:
+          - out_of_time
+          - statement_seems_false
+          - hypothesis_too_weak
+          - does_not_elaborate
+          - missing_lemma
+          - other
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pnp-lease-v2-${{ inputs.assignment_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate assignment run ID
+        shell: bash
+        env:
+          ASSIGNMENT_RUN_ID: ${{ inputs.assignment_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$ASSIGNMENT_RUN_ID" =~ ^[1-9][0-9]{0,17}$ ]] || {
+            echo 'Invalid assignment run ID (digits only)' >&2
+            exit 1
+          }
+
+      - name: Download assignment artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.assignment_run_id }}
+          github-token: ${{ github.token }}
+          name: pnp-assignment-${{ inputs.assignment_run_id }}
+          path: .pnp-claim
+
+      - name: Renew or release with curl
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_REASON: ${{ inputs.release_reason }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          from urllib.parse import urlencode
+
+          data = json.loads(Path('.pnp-claim/assignment.json').read_text(encoding='utf-8'))
+          gap = data.get('gap')
+          lease = data.get('lease')
+          if not isinstance(gap, dict) or not isinstance(gap.get('id'), str):
+              raise ValueError('Assignment artifact has no gap')
+          if not isinstance(lease, dict) or not isinstance(lease.get('id'), str) or not lease['id']:
+              raise ValueError('Assignment artifact has no lease ID')
+
+          operation = os.environ['OPERATION']
+          if operation not in ('renew', 'release'):
+              raise ValueError('Invalid operation')
+          endpoint = 'beat' if operation == 'renew' else 'release'
+          params = {'lease': lease['id']}
+          if operation == 'release':
+              reason = os.environ['RELEASE_REASON']
+              if reason not in ('out_of_time', 'statement_seems_false', 'hypothesis_too_weak',
+                                'does_not_elaborate', 'missing_lemma', 'other'):
+                  raise ValueError('Invalid release reason')
+              params['reason'] = reason
+
+          # Never print this URL; it contains the private lease identifier.
+          url = 'https://pequalnp.com/desk/' + endpoint + '?' + urlencode(params)
+          print('Gap:', gap['id'])
+          print('Operation:', operation)
+          print('Original expiration:', lease.get('expires_at', 'unknown'))
+          with tempfile.TemporaryDirectory() as tmp:
+              body_path = str(Path(tmp) / 'response.json')
+              result = subprocess.run([
+                  'curl', '--silent', '--show-error', '--proto', '=https',
+                  '--max-redirs', '0', '--connect-timeout', '15', '--max-time', '40',
+                  '--request', 'POST', '--output', body_path,
+                  '--write-out', '%{http_code}', url
+              ], text=True, capture_output=True)
+              if result.returncode != 0:
+                  print('Network request failed; curl exit code:', result.returncode)
+                  raise SystemExit(1)
+              status = result.stdout.strip()
+              print('Coordinator HTTP status:', status)
+              if not status.isdigit() or not (200 <= int(status) < 300):
+                  print('Coordinator rejected request. A 403 may indicate an expired/invalid lease or a server-side restriction.')
+                  raise SystemExit(1)
+              if operation == 'renew':
+                  try:
+                      response = json.loads(Path(body_path).read_text(encoding='utf-8'))
+                  except (OSError, ValueError):
+                      raise ValueError('Renewal reply was not valid JSON')
+                  next_lease = response.get('lease') if isinstance(response, dict) else None
+                  if not isinstance(next_lease, dict) or not next_lease.get('expires_at'):
+                      raise ValueError('Renewal reply lacks updated expiration')
+                  print('Lease renewed until:', next_lease['expires_at'])
+              else:
+                  print('Release accepted by coordinator (HTTP 2xx).')
+          PY
