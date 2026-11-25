@@ -12,6 +12,8 @@ namespace PEqualNP.Outside.L_meta_3457_mixed_pair
 open PEqualNP.CircuitLowerBounds PEqualNP.MetaComplexity
 open PEqualNP.MetaComplexity.NestedCover PEqualNP.EdgeOwnership
 
+local instance : DecidableEq GateOp := gateOpDecEq
+
 def sample : Circuit :=
   ⟨[⟨GateOp.or, [0,3]⟩, ⟨GateOp.or, [1,2]⟩,
     ⟨GateOp.and, [4,5]⟩, ⟨GateOp.or, [0,1]⟩,
@@ -49,13 +51,16 @@ def matching : SimpleGraph (Fin 4) := edgeGraph 4 [(0,2),(1,3)]
 
 theorem not_star : ¬ HasStarProfile 4 matching sample := by
   intro h
-  have h₁ : matching.Adj (0 : Fin 4) 2 := by decide
-  have h₂ : matching.Adj (1 : Fin 4) 3 := by decide
+  have h₁ : matching.Adj (0 : Fin 4) 2 := by
+    change (edgeGraph 4 [(0,2),(1,3)]).Adj 0 2
+    decide
+  have h₂ : matching.Adj (1 : Fin 4) 3 := by
+    change (edgeGraph 4 [(0,2),(1,3)]).Adj 1 3
+    decide
   rcases h 2 (by decide) (by decide) with hn | ⟨c, hc⟩
   · exact hn 0 2 h₁ disjoint_owned.1
   · have ha := hc 0 2 h₁ disjoint_owned.1
     have hb := hc 1 3 h₂ disjoint_owned.2
-    rcases ha with ha | ha <;> rcases hb with hb | hb <;>
-      have hh := ha.trans hb.symm <;> exact (by decide : _ ≠ _) hh
+    fin_cases c <;> simp_all
 
 end PEqualNP.Outside.L_meta_3457_mixed_pair
