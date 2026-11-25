@@ -191,4 +191,31 @@ theorem support_split {n m : ℕ} (C : Circuit) (e : Fin m → Fin n)
         simp [hs]
       | cons c rest => simp [hs] at hlen
 
+
+def OrWire (n : ℕ) (C : Circuit) (i : ℕ) : Prop :=
+  n ≤ i ∧ i < n+C.gates.length ∧ (atGate C.gates (i-n)).op = GateOp.or
+
+theorem support_large_is_or {n m : ℕ} (C : Circuit) (e : Fin m → Fin n)
+    (he : Function.Injective e) (i : ℕ) (hi : 1 < (support C e i).card) :
+    OrWire n C i := by
+  have hn : n ≤ i := by
+    by_contra h
+    have hh := support_input_small C e he i (by omega)
+    omega
+  have hg : i < n+C.gates.length := by
+    by_contra h
+    rw [support_beyond_empty C e i (by omega)] at hi
+    simp at hi
+  refine ⟨hn,hg,?_⟩
+  by_contra h
+  have hidx : i = n+(i-n) := by omega
+  have hj : i-n < C.gates.length := by omega
+  have hempty := support_nonor_empty C e (i-n) hj h
+  have heq : support C e i = ∅ := by
+    calc
+      support C e i = support C e (n+(i-n)) := congrArg (support C e) hidx
+      _ = ∅ := hempty
+  rw [heq] at hi
+  simp at hi
+
 end PEqualNP.Outside.L_meta_3457_support_dag
