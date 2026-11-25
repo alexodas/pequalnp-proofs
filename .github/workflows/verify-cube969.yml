@@ -1,0 +1,68 @@
+# Fork-only research workflow. Never include this in an upstream proof PR.
+name: Verify cube969 research lemmas
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cube969-verify
+  cancel-in-progress: false
+
+jobs:
+  lean-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out research branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent-ci
+          persist-credentials: false
+
+      - name: Install pinned Lean toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/elan" toolchain install "$(cat lean/lean-toolchain)"
+
+      - name: Download precompiled Mathlib
+        working-directory: lean
+        shell: bash
+        run: |
+          set -euo pipefail
+          lake exe cache get
+
+      - name: Compile all three lemmas
+        shell: bash
+        working-directory: lean
+        run: |
+          set -uo pipefail
+          : > "$RUNNER_TEMP/cube969-build.log"
+          ok=true
+          for module in \
+            PEqualNP.Outside.L_cube969_rectangles \
+            PEqualNP.Outside.L_cube969_samples \
+            PEqualNP.Outside.L_cube969_prefix9; do
+            echo "::group::lake build $module"
+            if timeout 1800 lake build "$module" 2>&1 | tee -a "$RUNNER_TEMP/cube969-build.log"; then
+              echo "PASS $module"
+            else
+              echo "FAIL $module"
+              ok=false
+            fi
+            echo "::endgroup::"
+          done
+          [[ "$ok" == true ]]
+
+      - name: Upload compiler logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cube969-lean-logs-${{ github.run_id }}
+          path: ${{ runner.temp }}/cube969-build.log
+          if-no-files-found: warn
