@@ -18,7 +18,7 @@ theorem budget_succ (Q : ℕ → Prop) [DecidablePred Q] (m : ℕ) :
     budget Q (m+1) = budget Q m + (if Q m then 1 else 0) := by
   classical
   unfold budget
-  rw [Finset.range_succ]
+  rw [Finset.range_add_one]
   by_cases h : Q m <;> simp [h]
 
 theorem budget_mono_succ (Q : ℕ → Prop) (m : ℕ) :
@@ -161,7 +161,7 @@ theorem unique_budget_sum {β : Type*} [Fintype β] (Q : β → ℕ → Prop)
             intro d hd
             by_cases h : Q d m
             · have hh := huniq m d c h hc
-              simp [h,hh]
+              simp [hc,hh]
             · simp [h]
           _ = 1 := by simp
       · have hn : ∀ c, ¬ Q c m := fun c h => he ⟨c,h⟩
@@ -227,7 +227,7 @@ theorem unique_budget_sum_le {β : Type*} [Fintype β]
             intro d hd
             by_cases h : Q d m
             · have hh := huniq m d c h hc
-              simp [h,hh]
+              simp [hc,hh]
             · simp [h]
           _ = 1 := by simp
       · have hn : ∀ c, ¬ Q c m := fun c h => he ⟨c,h⟩
