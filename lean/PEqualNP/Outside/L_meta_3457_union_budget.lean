@@ -14,8 +14,8 @@ noncomputable def budget (Q : ℕ → Prop) (m : ℕ) : ℕ := by
   classical
   exact ((Finset.range m).filter Q).card
 
-theorem budget_succ (Q : ℕ → Prop) [DecidablePred Q] (m : ℕ) :
-    budget Q (m+1) = budget Q m + (if Q m then 1 else 0) := by
+theorem budget_succ (Q : ℕ → Prop) (m : ℕ) :
+    budget Q (m+1) = budget Q m + (@ite ℕ (Q m) (Classical.propDecidable _) 1 0) := by
   classical
   unfold budget
   by_cases h : Q m
