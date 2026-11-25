@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: fork-lean-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   compile:
@@ -42,10 +42,10 @@ jobs:
           set -euo pipefail
           lake exe cache get
 
-      - name: Compile changed proof modules
+      - name: Compile all research modules since upstream base
         shell: bash
         env:
-          BEFORE_SHA: ${{ github.event.before }}
+          BEFORE_SHA: 103802db259f54d058acafed28db50fa60761b17
         run: |
           set -euo pipefail
           modules=()
