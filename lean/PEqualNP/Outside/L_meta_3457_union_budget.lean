@@ -139,4 +139,67 @@ theorem restricted_union_bound (S : ℕ → Finset α)
   rw [heq] at h
   exact h
 
+
+/-- If each node is chargeable to at most one centre, the sum of
+    the centre-specific budgets is at most the number of nodes. -/
+theorem unique_budget_sum {β : Type*} [Fintype β] (Q : β → ℕ → Prop)
+    (huniq : ∀ j c d, Q c j → Q d j → c = d) (m : ℕ) :
+    (∑ c : β, budget (Q c) m) ≤ m := by
+  classical
+  induction m with
+  | zero => simp [budget]
+  | succ m ih =>
+    simp_rw [budget_succ]
+    rw [Finset.sum_add_distrib]
+    have hstep : (∑ c : β, if Q c m then 1 else 0) ≤ 1 := by
+      by_cases he : ∃ c, Q c m
+      · obtain ⟨c,hc⟩ := he
+        calc
+          (∑ d : β, if Q d m then 1 else 0) ≤
+              ∑ d : β, if d = c then 1 else 0 := by
+            apply Finset.sum_le_sum
+            intro d hd
+            by_cases h : Q d m
+            · have hh := huniq m d c h hc
+              simp [h,hh]
+            · simp [h]
+          _ = 1 := by simp
+      · have hn : ∀ c, ¬ Q c m := fun c h => he ⟨c,h⟩
+        simp [hn]
+    omega
+
+/-- If two different neighbourhoods intersect in at most one
+    vertex, no nontrivial OR support can be charged to both.
+    Thus sharing of OR nodes does not invalidate the root/leaf
+    bound when summed over all centres. -/
+theorem neighbourhood_union_sum {β : Type*} [Fintype β]
+    (S : ℕ → Finset α) (V : β → Finset α) (R : β → Finset ℕ)
+    (hsplit : ∀ j, 1 < (S j).card →
+      ∃ a b, a < j ∧ b < j ∧ S j = S a ∪ S b)
+    (hinter : ∀ c d, c ≠ d → (V c ∩ V d).card ≤ 1)
+    (m : ℕ) (hR : ∀ c, R c ⊆ Finset.range m)
+    (hsub : ∀ c j, j ∈ R c → S j ⊆ V c) :
+    (∑ c : β, ((R c).biUnion S).card) ≤
+      (∑ c : β, (R c).card) + m := by
+  classical
+  let Q := fun c : β => fun j : ℕ => 1 < (S j).card ∧ S j ⊆ V c
+  have hu : ∀ j c d, Q c j → Q d j → c = d := by
+    intro j c d hc hd
+    by_contra hn
+    have hle : (S j).card ≤ (V c ∩ V d).card :=
+      Finset.card_le_card (fun x hx => Finset.mem_inter.mpr ⟨hc.2 hx,hd.2 hx⟩)
+    have hb := hinter c d hn
+    have hlarge := hc.1
+    omega
+  calc
+    (∑ c : β, ((R c).biUnion S).card) ≤
+        ∑ c : β, ((R c).card + budget (Q c) m) := by
+      apply Finset.sum_le_sum
+      intro c hc
+      exact restricted_union_bound S hsplit (V c) m (R c) (hR c) (hsub c)
+    _ = (∑ c : β, (R c).card) + ∑ c : β, budget (Q c) m := by
+      rw [Finset.sum_add_distrib]
+    _ ≤ (∑ c : β, (R c).card) + m :=
+      Nat.add_le_add_left (unique_budget_sum Q hu m) _
+
 end PEqualNP.Outside.L_meta_3457_union_budget
