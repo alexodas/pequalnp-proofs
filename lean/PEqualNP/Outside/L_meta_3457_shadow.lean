@@ -93,7 +93,7 @@ theorem shadow_fold_eq (gs : List Gate) (w : List Bool) (h : Silent gs w) :
           unfold step at hz
           rw [getD_snoc' w _ _ rfl] at hz
           exact hz
-        simp [shadowStep, hg, step, hval]
+        simp only [shadowStep, hg, if_false, step, hval]
     have ht : Silent gs (step w g) := by
       intro j hj hop
       have hp : (atGate (g :: gs) (j+1)).op ≠ GateOp.or := by

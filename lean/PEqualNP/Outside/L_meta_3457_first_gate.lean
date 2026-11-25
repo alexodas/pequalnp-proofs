@@ -108,7 +108,7 @@ theorem test_has_two_operands (gs : List Gate) (g : Gate)
       cases hpl
     | cons b rest =>
       cases rest with
-      | nil => exact ⟨a,b,hi⟩
+      | nil => exact ⟨a,b,by first | rfl | exact hi⟩
       | cons c rest => simp [hi] at hlen
 
 /-- The local two-centre cover holds for every clean AND's OR-shadow
@@ -144,8 +144,7 @@ theorem gateTest_two_centres (N : ℕ) (I : Fin N → Fin N → Prop)
           Cross ap al bp bl p l := by
       intro p l
       rw [gateTest_binary gs g _ hop a b hab,
-        shadow_read_pair gs _ _ a, shadow_read_pair gs _ _ b]
-      rfl
+        shadow_read_pair gs _ _ a, shadow_read_pair gs _ _ b] <;> rfl
     obtain ⟨T,ht,hcover⟩ := cross_two_centres N I hf ap al bp bl hp hl
       (fun p l h => hC p l ((hiff p l).mpr h))
     exact ⟨T,ht,fun p l h => hcover p l ((hiff p l).mp h)⟩
