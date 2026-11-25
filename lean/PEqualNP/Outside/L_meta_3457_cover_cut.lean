@@ -308,6 +308,7 @@ theorem point_line_distinct (N : ℕ) (p l : Fin N) :
   intro h
   have hh := congrArg Fin.val h
   simp only [Fin.val_castAdd, Fin.val_natAdd] at hh
+  have hp := p.isLt
   omega
 
 /-- A sufficient cut: if an owner-list cover circuit fits the original
@@ -336,7 +337,6 @@ theorem normalization_of_cover_budget (N : ℕ) (I : Fin N → Fin N → Prop)
         ∀ l : Fin N, (D.wires (List.ofFn (fun k : Fin (N + N) =>
           decide (k = Fin.natAdd N l)))).getD (N + N + j) false = false) := by
   let D := coverCircuitB (N + N) own
-  refine ⟨D, (circuit_shape _ _).1, cover_reads_back _ _ hown, hbudget, hfun, ?_, ?_⟩
   have hneg : ∀ z : Fin (N + N) → Bool,
       (¬ ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧
         z (Fin.natAdd N l) = true) → D.eval (List.ofFn z) = false := by
@@ -350,6 +350,7 @@ theorem normalization_of_cover_budget (N : ℕ) (I : Fin N → Fin N → Prop)
       ∀ j < D.gates.length, (gateAt D j).op = GateOp.and →
         (D.wires (List.ofFn z)).getD (N + N + j) false = false :=
     fun z hz j hj hop => cover_ands_false_on_negative _ _ hown z (hneg z hz) j hj hop
+  refine ⟨D, (circuit_shape _ _).1, cover_reads_back _ _ hown, hbudget, hfun, ?_, ?_⟩
   · intro j hj hop p0 l0 hI
     apply hc _ _ j hj hop
     rintro ⟨p, l, hi, hp, hl⟩
