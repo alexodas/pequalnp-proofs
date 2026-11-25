@@ -1,7 +1,7 @@
 # Fork-only. Never include this workflow in a proof PR to open-goat/pequalnp-proofs.
 # Rechecks the public desk every 20 minutes until a *new* gap is assigned;
 # skips and immediately releases previously researched gaps and steps tagged 'False:'.
-# All other assignments are kept alive with periodic heartbeat.
+# All other assignments are kept alive with 5-minute heartbeats per official join.txt.
 # then renews that same gap, without exceeding one job's 6-hour limit.
 name: PEqualNP new gap (skip prior/False) + long keeper
 
@@ -244,7 +244,32 @@ jobs:
           while True:
               code, body = post('beat')
               if code == '410':
-                  print('Lease no longer valid (HTTP 410); stopping.', flush=True)
+                  # A 410 can mean an expired lease or a step withdrawn/settled
+                  # while we worked. Do not assume which; inspect the response.
+                  try:
+                      reply = json.loads(body)
+                      withdrawn = reply.get('withdrawn') is True
+                  except (ValueError, AttributeError):
+                      withdrawn = False
+                  print('Lease invalid (HTTP 410). Withdrawn flag:', withdrawn, flush=True)
+                  # Public read-only check. Never print a lease ID or its URL.
+                  check = subprocess.run(
+                      ['curl', '--silent', '--show-error', '--proto', '=https',
+                       '--max-redirs', '0', '--connect-timeout', '10', '--max-time', '15',
+                       '--get', '--data-urlencode', 'gap=' + gap['id'],
+                       'https://pequalnp.com/desk/step'],
+                      text=True, capture_output=True)
+                  if check.returncode == 0:
+                      try:
+                          state = json.loads(check.stdout).get('state')
+                          if isinstance(state, str) and state in (
+                              'open', 'leased', 'proved', 'settled', 'withdrawn',
+                              'closed', 'released', 'refuted', 'expired'):
+                              print('Public desk step state:', state, flush=True)
+                          else:
+                              print('Public desk step state: not classified', flush=True)
+                      except (ValueError, AttributeError):
+                          print('Public desk state reply could not be decoded', flush=True)
                   raise SystemExit(1)
               if code != '200':
                   print('Heartbeat rejected; HTTP', code, flush=True)
@@ -257,7 +282,7 @@ jobs:
               remain = deadline - time.time()
               if remain <= 45:
                   break
-              time.sleep(min(8 * 60, max(0, remain - 45)))
+              time.sleep(min(5 * 60, max(0, remain - 45)))
 
           status, _ = post('release', {'reason': 'out_of_time'})
           if not status.isdigit() or not (200 <= int(status) < 300):
