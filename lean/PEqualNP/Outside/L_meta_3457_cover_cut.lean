@@ -201,7 +201,7 @@ theorem block_reads_back (B a t v : ℕ) (rs : List ℕ) (lead : Bool)
         [(v :: (List.range rs.length).map (fun q => B + q)).getD j 0, rs.getD j 0]⟩ := by
       simp [atGate, os, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hlt]
     rw [he] at hi
-    simp only [List.mem_cons, List.mem_singleton] at hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
     rcases hi with h | h
     · rw [h]
       exact chain_operand_bound B v rs j hv (by omega)
@@ -215,7 +215,7 @@ theorem block_reads_back (B a t v : ℕ) (rs : List ℕ) (lead : Bool)
     · subst j
       rw [Nat.sub_self] at hi
       change i ∈ [t, (v :: (List.range rs.length).map (fun q => B + q)).getD rs.length 0] at hi
-      simp only [List.mem_cons, List.mem_singleton] at hi
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
       rcases hi with h | h
       · omega
       · rw [h]
@@ -230,9 +230,10 @@ theorem block_reads_back (B a t v : ℕ) (rs : List ℕ) (lead : Bool)
           rw [block_length] at hj
           simp at hj
           omega
-      rw [hd, hl] at hi
+      rw [hd] at hi
+      simp only [tail, hl] at hi
       change i ∈ [a, B + rs.length] at hi
-      simp only [List.mem_cons, List.mem_singleton] at hi
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
       have ha' := ha hl
       rcases hi with h | h <;> omega
 
@@ -285,5 +286,97 @@ theorem cover_reads_back (n : ℕ) (own : List (ℕ × List ℕ))
   change i ∈ (atGate (coverCircuitB n own).gates j).inputs at hi
   rw [hg] at hi
   exact gates_reads_back n own n true 0 hown le_rfl (by simp) j hj i hi
+
+
+/-- Output soundness implies that every AND vanishes on every negative row. -/
+theorem cover_ands_false_on_negative (n : ℕ) (own : List (ℕ × List ℕ))
+    (hown : ∀ p ∈ own, p.1 < n ∧ ∀ u ∈ p.2, u < n)
+    (z : Fin n → Bool) (hz : (coverCircuitB n own).eval (List.ofFn z) = false)
+    (j : ℕ) (hj : j < (coverCircuitB n own).gates.length)
+    (hop : (gateAt (coverCircuitB n own) j).op = GateOp.and) :
+    ((coverCircuitB n own).wires (List.ofFn z)).getD (n + j) false = false := by
+  cases he : ((coverCircuitB n own).wires (List.ofFn z)).getD (n + j) false with
+  | false => rfl
+  | true =>
+    have h := cover_ands_below_output n own hown z j hj hop he
+    rw [hz] at h
+    cases h
+
+/-- The two kinds of vertices have distinct wire indices. -/
+theorem point_line_distinct (N : ℕ) (p l : Fin N) :
+    Fin.castAdd N p ≠ Fin.natAdd N l := by
+  intro h
+  have hh := congrArg Fin.val h
+  simp only [Fin.val_castAdd, Fin.val_natAdd] at hh
+  omega
+
+/-- A sufficient cut: if an owner-list cover circuit fits the original
+    gate budget and computes the incidence function, it satisfies all
+    the requested normalization conclusions. The budget remains open. -/
+theorem normalization_of_cover_budget (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (own : List (ℕ × List ℕ))
+    (hown : ∀ p ∈ own, p.1 < N + N ∧ ∀ u ∈ p.2, u < N + N)
+    (hbudget : (coverCircuitB (N + N) own).size ≤ C.size)
+    (hfun : ∀ z : Fin (N + N) → Bool,
+      (coverCircuitB (N + N) own).eval (List.ofFn z) = true ↔
+        ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧
+          z (Fin.natAdd N l) = true) :
+    ∃ D : Circuit, Monotone2 D ∧ ReadsBack (N + N) D ∧ D.size ≤ C.size ∧
+      (∀ z : Fin (N + N) → Bool, D.eval (List.ofFn z) = true ↔
+        ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧
+          z (Fin.natAdd N l) = true) ∧
+      (∀ j < D.gates.length, (gateAt D j).op = GateOp.and →
+        ∀ p0 l0 : Fin N, ¬ I p0 l0 →
+          (D.wires (List.ofFn (fun k : Fin (N + N) =>
+            decide (k = Fin.castAdd N p0 ∨ k = Fin.natAdd N l0)))).getD
+              (N + N + j) false = false) ∧
+      (∀ j < D.gates.length, (gateAt D j).op = GateOp.and →
+        (∀ p : Fin N, (D.wires (List.ofFn (fun k : Fin (N + N) =>
+          decide (k = Fin.castAdd N p)))).getD (N + N + j) false = false) ∧
+        ∀ l : Fin N, (D.wires (List.ofFn (fun k : Fin (N + N) =>
+          decide (k = Fin.natAdd N l)))).getD (N + N + j) false = false) := by
+  let D := coverCircuitB (N + N) own
+  refine ⟨D, (circuit_shape _ _).1, cover_reads_back _ _ hown, hbudget, hfun, ?_, ?_⟩
+  have hneg : ∀ z : Fin (N + N) → Bool,
+      (¬ ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧
+        z (Fin.natAdd N l) = true) → D.eval (List.ofFn z) = false := by
+    intro z hz
+    cases he : D.eval (List.ofFn z) with
+    | false => rfl
+    | true => exact False.elim (hz ((hfun z).mp he))
+  have hc : ∀ (z : Fin (N + N) → Bool),
+      (¬ ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧
+        z (Fin.natAdd N l) = true) →
+      ∀ j < D.gates.length, (gateAt D j).op = GateOp.and →
+        (D.wires (List.ofFn z)).getD (N + N + j) false = false :=
+    fun z hz j hj hop => cover_ands_false_on_negative _ _ hown z (hneg z hz) j hj hop
+  · intro j hj hop p0 l0 hI
+    apply hc _ _ j hj hop
+    rintro ⟨p, l, hi, hp, hl⟩
+    have hpp : Fin.castAdd N p = Fin.castAdd N p0 := by
+      have h := of_decide_eq_true hp
+      exact h.resolve_right (point_line_distinct N p l0)
+    have hll : Fin.natAdd N l = Fin.natAdd N l0 := by
+      have h := of_decide_eq_true hl
+      exact h.resolve_left (Ne.symm (point_line_distinct N p0 l))
+    have ep : p = p0 := by
+      apply Fin.ext
+      exact congrArg Fin.val hpp
+    have el : l = l0 := by
+      apply Fin.ext
+      have hh := congrArg Fin.val hll
+      simp only [Fin.val_natAdd] at hh
+      omega
+    exact hI (ep ▸ el ▸ hi)
+  · intro j hj hop
+    constructor
+    · intro p0
+      apply hc _ _ j hj hop
+      rintro ⟨p, l, hi, hp, hl⟩
+      exact (point_line_distinct N p0 l).symm (of_decide_eq_true hl)
+    · intro l0
+      apply hc _ _ j hj hop
+      rintro ⟨p, l, hi, hp, hl⟩
+      exact point_line_distinct N p l0 (of_decide_eq_true hp)
 
 end PEqualNP.Outside.L_meta_3457_cover_cut
