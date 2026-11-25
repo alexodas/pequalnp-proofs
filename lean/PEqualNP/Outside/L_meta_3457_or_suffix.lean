@@ -116,4 +116,91 @@ theorem terminal_dirty_not_critical (pre post : List Gate) (g : Gate) (o : ℕ)
     rw [hnegative] at hv
     cases hv
 
+
+theorem gate_split (gs : List Gate) (j : ℕ) (hj : j < gs.length) :
+    gs.take j ++ atGate gs j :: gs.drop (j+1) = gs := by
+  have h : atGate gs j = gs[j] := by
+    simp [atGate, List.getD_eq_getElem?_getD, hj]
+  rw [h, ← List.drop_eq_getElem_cons hj, List.take_append_drop]
+
+theorem gate_set_split (gs : List Gate) (j : ℕ) (g : Gate)
+    (hj : j < gs.length) :
+    gs.set j g = gs.take j ++ g :: gs.drop (j+1) := by
+  induction gs generalizing j with
+  | nil => simp at hj
+  | cons k ks ih =>
+    cases j with
+    | zero => rfl
+    | succ j =>
+      have hh : j < ks.length := by simp at hj; omega
+      simp only [List.set_cons_succ, List.take_succ_cons, List.cons_append,
+        Nat.succ_add, List.drop_succ_cons]
+      exact congrArg (List.cons k) (ih j hh)
+
+theorem circuit_as_slot (C : Circuit) (j : ℕ) (hj : j < C.gates.length) :
+    slot (C.gates.take j) (C.gates.drop (j+1)) (atGate C.gates j) C.output = C := by
+  cases C with
+  | mk gs o =>
+    unfold slot
+    rw [gate_split gs j hj]
+
+theorem suppression_as_slot (C : Circuit) (j : ℕ) (hj : j < C.gates.length) :
+    suppress C j = slot (C.gates.take j) (C.gates.drop (j+1)) zeroGate C.output := by
+  unfold suppress slot
+  rw [gate_set_split C.gates j zeroGate hj]
+
+/-- The original circuit's terminal dirty gate is never critical. -/
+theorem terminal_dirty_not_critical_circuit (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (h : Admissible N I C) (j : ℕ) (p l : Fin N)
+    (hd : (j,p,l) ∈ dirtySites N I C)
+    (ho : OrOnly (C.gates.drop (j+1))) :
+    ¬ Critical N I C j := by
+  obtain ⟨hj,hn,hop,hv⟩ := (mem_dirtySites N I C j p l).mp hd
+  intro hc
+  obtain ⟨q,m,hi,hzero⟩ := hc
+  let v := doubleRow (Fin.castAdd N p) (Fin.natAdd N l)
+  let u := doubleRow (Fin.castAdd N q) (Fin.natAdd N m)
+  have hvlen : v.length = N+N := by simp [v,doubleRow]
+  have hulen : u.length = N+N := by simp [u,doubleRow]
+  have hnegative : C.eval v = false := by
+    cases he : C.eval v with
+    | false => rfl
+    | true =>
+      obtain ⟨p',l',hi',hp,hl⟩ := (h.2.2.1
+        (fun k => decide (k = Fin.castAdd N p ∨ k = Fin.natAdd N l))).mp he
+      have hp' := of_decide_eq_true hp
+      have hl' := of_decide_eq_true hl
+      have hp'' := hp'.resolve_right (point_line_distinct N p' l)
+      have hl'' := hl'.resolve_left (Ne.symm (point_line_distinct N p l'))
+      have ep : p' = p := by
+        apply Fin.ext
+        exact congrArg (fun k : Fin (N+N) => k.val) hp''
+      have el : l' = l := by
+        apply Fin.ext
+        have hh := congrArg (fun k : Fin (N+N) => k.val) hl''
+        simp only [Fin.val_natAdd] at hh
+        omega
+      exact False.elim (hn (ep ▸ el ▸ hi'))
+  have hpositive : C.eval u = true := by
+    apply (h.2.2.1 (fun k => decide (k = Fin.castAdd N q ∨ k = Fin.natAdd N m))).mpr
+    exact ⟨q,m,hi,by simp,by simp⟩
+  have hdirty : preValue (C.gates.take j) (atGate C.gates j) v = true := by
+    change (C.gates.foldl step v).getD (N+N+j) false = true at hv
+    rw [← hvlen, PEqualNP.Outside.L_meta_3457_first_gate.wire_at_gate C.gates v j hj] at hv
+    exact hv
+  have he := circuit_as_slot C j hj
+  have hz := terminal_dirty_not_critical (C.gates.take j) (C.gates.drop (j+1))
+    (atGate C.gates j) C.output u v (hulen.trans hvlen.symm) ho
+    (by simpa only [he] using hpositive) (by simpa only [he] using hnegative) hdirty
+  rw [← suppression_as_slot C j hj] at hz
+  change (suppress C j).eval u = false at hzero
+  rw [hzero] at hz
+  cases hz
+
+theorem critical_dirty_requires_nonor_suffix (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (h : Admissible N I C) (j : ℕ) (p l : Fin N)
+    (hd : (j,p,l) ∈ dirtySites N I C) (hc : Critical N I C j) :
+    ¬ OrOnly (C.gates.drop (j+1)) :=
+  fun ho => terminal_dirty_not_critical_circuit N I C h j p l hd ho hc
+
 end PEqualNP.Outside.L_meta_3457_or_suffix
