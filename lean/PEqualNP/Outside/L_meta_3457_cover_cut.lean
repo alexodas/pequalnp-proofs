@@ -362,7 +362,8 @@ theorem normalization_of_cover_budget (N : ℕ) (I : Fin N → Fin N → Prop)
       exact h.resolve_left (Ne.symm (point_line_distinct N p0 l))
     have ep : p = p0 := by
       apply Fin.ext
-      exact congrArg Fin.val hpp
+      have hh := congrArg (fun k : Fin (N + N) => k.val) hpp
+      simpa only [Fin.val_castAdd] using hh
     have el : l = l0 := by
       apply Fin.ext
       have hh := congrArg Fin.val hll
