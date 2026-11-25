@@ -78,8 +78,7 @@ theorem mem_dirtySites (N : ℕ) (I : Fin N → Fin N → Prop)
       (C.wires (doubleRow (Fin.castAdd N p) (Fin.natAdd N l))).getD
         (N+N+k) false = true := by
   classical
-  simp only [dirtySites, Finset.mem_filter, Finset.mem_product,
-    Finset.mem_range, Finset.mem_univ, and_true]
+  simp [dirtySites, Finset.mem_product]
 
 theorem suppression_dirty_subset (N : ℕ) (I : Fin N → Fin N → Prop)
     (C : Circuit) (j : ℕ) (hm : Monotone2 C) :
@@ -124,7 +123,7 @@ theorem dirty_empty_iff (N : ℕ) (I : Fin N → Fin N → Prop) (C : Circuit) :
     | true =>
       have hh := (mem_dirtySites N I C j p l).mpr ⟨hj,hi,hop,hv⟩
       rw [h] at hh
-      exact False.elim (Finset.not_mem_empty _ hh)
+      simpa using hh
   · intro h
     apply Finset.eq_empty_iff_forall_notMem.mpr
     rintro ⟨j,p,l⟩ hj
