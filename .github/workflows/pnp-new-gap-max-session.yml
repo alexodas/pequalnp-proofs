@@ -1,8 +1,9 @@
 # Fork-only. Never include this workflow in a proof PR to open-goat/pequalnp-proofs.
 # Rechecks the public desk every 20 minutes until a *new* gap is assigned;
-# releases L-meta-969 immediately if the coordinator reassigns it.
+# skips and immediately releases the three previously researched gaps.
+# All other assignments are kept alive with periodic heartbeat.
 # then renews that same gap, without exceeding one job's 6-hour limit.
-name: PEqualNP new gap (skip cube) + long keeper
+name: PEqualNP new gap (skip previous) + long keeper
 
 on:
   workflow_dispatch:
@@ -133,8 +134,8 @@ jobs:
                   if not isinstance(lease.get('id'), str) or not lease['id']:
                       raise SystemExit('Malformed lease identifier')
 
-                  # Release our previously investigated cube gap, then seek another.
-                  if gid == 'L-meta-969':
+                  # Exclude all previously researched gaps, then seek a different one.
+                  if gid in ('L-meta-969', 'L-meta-12017', 'L-meta-11033'):
                       from urllib.parse import urlencode
                       release_url = 'https://pequalnp.com/desk/release?' + urlencode(
                           {'lease': lease['id'], 'reason': 'other'})
@@ -151,11 +152,11 @@ jobs:
                           released_status = 0
                       if released.returncode != 0 or not 200 <= released_status < 300:
                           raise SystemExit('Could not release excluded gap; no automatic re-claim')
-                      print('Skipped and released previously investigated L-meta-969.', flush=True)
+                      print('Skipped and released previously researched gap:', gid, flush=True)
                       remaining = claim_deadline - time.time()
                       if remaining <= 0:
                           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
-                              out.write('## No different problem assigned\\n\\nPrevious cube gap was released.\\n')
+                              out.write('## No different problem assigned\\n\\nPreviously researched gap was released.\\n')
                           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
                               out.write('assigned=false\\n')
                           break
