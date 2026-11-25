@@ -34,8 +34,10 @@ theorem below_snoc (u v : List Bool) (a b : Bool) (h : Below u v)
     rw [getD_tail u [a] i hle] at hi
     rw [getD_tail v [b] i hle', ← hlen]
     cases hk : i-u.length with
-    | zero => exact hab hi
-    | succ k => simp at hi
+    | zero =>
+      have ha : a = true := by simpa [hk] using hi
+      simpa using hab ha
+    | succ k => simp [hk] at hi
 
 theorem eval_mono (g : Gate) (u v : List Bool) (h : Below u v)
     (hg : g.op = GateOp.and ∨ g.op = GateOp.or) :
