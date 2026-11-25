@@ -18,8 +18,29 @@ theorem budget_succ (Q : ℕ → Prop) [DecidablePred Q] (m : ℕ) :
     budget Q (m+1) = budget Q m + (if Q m then 1 else 0) := by
   classical
   unfold budget
-  rw [Finset.range_add_one]
-  by_cases h : Q m <;> simp [h]
+  by_cases h : Q m
+  · have he : (Finset.range (m+1)).filter Q = insert m ((Finset.range m).filter Q) := by
+      ext i
+      simp only [Finset.mem_filter, Finset.mem_range, Finset.mem_insert]
+      constructor
+      · rintro ⟨hi,hq⟩
+        by_cases e : i = m
+        · exact Or.inl e
+        · exact Or.inr ⟨by omega,hq⟩
+      · rintro (rfl | ⟨hi,hq⟩)
+        · exact ⟨by omega,h⟩
+        · exact ⟨by omega,hq⟩
+    rw [he, Finset.card_insert_of_notMem (by simp), if_pos h]
+  · have he : (Finset.range (m+1)).filter Q = (Finset.range m).filter Q := by
+      ext i
+      simp only [Finset.mem_filter, Finset.mem_range]
+      constructor
+      · rintro ⟨hi,hq⟩
+        have hn : i ≠ m := fun e => h (e ▸ hq)
+        exact ⟨by omega,hq⟩
+      · rintro ⟨hi,hq⟩
+        exact ⟨by omega,hq⟩
+    rw [he, if_neg h, Nat.add_zero]
 
 theorem budget_mono_succ (Q : ℕ → Prop) (m : ℕ) :
     budget Q m ≤ budget Q (m+1) := by
