@@ -1,0 +1,75 @@
+# CI for the fork; do not include this file in a proof PR to the upstream project.
+name: Lean proof build (fork)
+
+on:
+  push:
+    branches:
+      - research-clean
+    paths:
+      - 'lean/**'
+      - '.github/workflows/fork-lean-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-lean-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out this fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Lean toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/elan" toolchain install "$(cat lean/lean-toolchain)"
+
+      - name: Download precompiled Mathlib
+        working-directory: lean
+        shell: bash
+        run: |
+          set -euo pipefail
+          lake exe cache get
+
+      - name: Compile changed proof modules
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          modules=()
+          base=""
+          if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+             [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]] &&
+             git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            base="$BEFORE_SHA"
+          elif git rev-parse "${GITHUB_SHA}^" >/dev/null 2>&1; then
+            base="$(git rev-parse "${GITHUB_SHA}^")"
+          fi
+          if [[ -n "$base" ]]; then
+            while IFS= read -r file; do
+              if [[ "$file" =~ ^lean/PEqualNP/Outside/(L_[a-z0-9_]+)[.]lean$ ]]; then
+                modules+=("PEqualNP.Outside.${BASH_REMATCH[1]}")
+              fi
+            done < <(git diff --name-only --diff-filter=ACM "$base" "$GITHUB_SHA" -- lean/PEqualNP/Outside)
+          fi
+          if [[ ${#modules[@]} -eq 0 ]]; then
+            modules+=(PEqualNP)
+          fi
+          cd lean
+          for module in "${modules[@]}"; do
+            echo "::group::lake build $module"
+            lake build "$module"
+            echo "::endgroup::"
+          done
