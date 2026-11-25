@@ -33,10 +33,11 @@ theorem merge_snoc (w u v : List Bool) (a b c : Bool) (h : Merge w u v)
   refine ⟨by simp [hu], by simp [hv], ?_⟩
   intro i
   by_cases hi : i < w.length
-  · rw [getD_app_left hi, getD_app_left (by omega : i < u.length),
-      getD_app_left (by omega : i < v.length), hm]
-  · rw [getD_tail _ _ _ (by omega), getD_tail _ _ _ (by omega),
-      getD_tail _ _ _ (by omega), ← hu, ← hv]
+  · rw [getD_app_left (w := w) (t := [a]) hi,
+      getD_app_left (w := u) (t := [b]) (by omega : i < u.length),
+      getD_app_left (w := v) (t := [c]) (by omega : i < v.length), hm]
+  · rw [getD_tail w [a] i (by omega), getD_tail u [b] i (by omega),
+      getD_tail v [c] i (by omega), ← hu, ← hv]
     cases hidx : i - w.length with
     | zero => simpa using he
     | succ k => simp
@@ -115,5 +116,75 @@ theorem first_binary_and_trace (gs : List Gate) (w u v : List Bool)
   have h := shadow_fold_merge gs w u v hm
   rw [shadow_fold_eq gs w hw, shadow_fold_eq gs u hu, shadow_fold_eq gs v hv] at h
   rw [h.2.2 a, h.2.2 b]
+
+
+def singletonRow {n : ℕ} (i : Fin n) : List Bool :=
+  List.ofFn (fun k : Fin n => decide (k = i))
+
+def doubleRow {n : ℕ} (i j : Fin n) : List Bool :=
+  List.ofFn (fun k : Fin n => decide (k = i ∨ k = j))
+
+theorem merge_double_row {n : ℕ} (i j : Fin n) :
+    Merge (doubleRow i j) (singletonRow i) (singletonRow j) := by
+  refine ⟨by simp [doubleRow, singletonRow], by simp [doubleRow, singletonRow], ?_⟩
+  intro k
+  by_cases hk : k < n
+  · simp [doubleRow, singletonRow, List.getD_eq_getElem?_getD, List.getElem?_ofFn, hk]
+  · simp [doubleRow, singletonRow, List.getD_eq_getElem?_getD, List.getElem?_ofFn, hk]
+
+/-- Every positive pair with negative singleton outputs must activate
+    at least one non-OR gate, if the singleton rows are silent. -/
+theorem exists_active_nonor (gs : List Gate) (w u v : List Bool) (o : ℕ)
+    (hm : Merge w u v) (hu : Silent gs u) (hv : Silent gs v)
+    (hU : (gs.foldl step u).getD o false = false)
+    (hV : (gs.foldl step v).getD o false = false)
+    (hW : (gs.foldl step w).getD o false = true) :
+    ∃ j < gs.length, (atGate gs j).op ≠ GateOp.or ∧
+      (gs.foldl step w).getD (w.length + j) false = true := by
+  classical
+  by_contra h
+  have hw : Silent gs w := by
+    intro j hj hop
+    cases he : (gs.foldl step w).getD (w.length+j) false with
+    | false => rfl
+    | true => exact False.elim (h ⟨j, hj, hop, he⟩)
+  have hm' := shadow_fold_merge gs w u v hm
+  rw [shadow_fold_eq gs w hw, shadow_fold_eq gs u hu, shadow_fold_eq gs v hv] at hm'
+  have he := hm'.2.2 o
+  rw [hW, hU, hV] at he
+  cases he
+
+/-- Choose the earliest active non-OR gate and obtain a silent past. -/
+theorem earliest_active_nonor (gs : List Gate) (w : List Bool)
+    (h : ∃ j < gs.length, (atGate gs j).op ≠ GateOp.or ∧
+      (gs.foldl step w).getD (w.length + j) false = true) :
+    ∃ j < gs.length, (atGate gs j).op ≠ GateOp.or ∧
+      (gs.foldl step w).getD (w.length + j) false = true ∧
+      ∀ i < j, (atGate gs i).op ≠ GateOp.or →
+        (gs.foldl step w).getD (w.length + i) false = false := by
+  classical
+  obtain ⟨hj, hop, hval⟩ := Nat.find_spec h
+  refine ⟨Nat.find h, hj, hop, hval, ?_⟩
+  intro i hi hio
+  cases he : (gs.foldl step w).getD (w.length+i) false with
+  | false => rfl
+  | true =>
+    have hh : i < gs.length ∧ (atGate gs i).op ≠ GateOp.or ∧
+        (gs.foldl step w).getD (w.length + i) false = true :=
+      ⟨lt_trans hi hj, hio, he⟩
+    have hle := Nat.find_min' h hh
+    omega
+
+theorem monotone_gate_nonor_is_and (C : Circuit)
+    (hm : PEqualNP.MetaComplexity.Monotone2 C)
+    (j : ℕ) (hj : j < C.gates.length)
+    (hn : (atGate C.gates j).op ≠ GateOp.or) :
+    (atGate C.gates j).op = GateOp.and := by
+  have hg : atGate C.gates j ∈ C.gates := by
+    simp [atGate, List.getD_eq_getElem?_getD, hj]
+  have hop : (atGate C.gates j).op = GateOp.and ∨
+      (atGate C.gates j).op = GateOp.or := by
+    simpa using (hm _ hg).1
+  exact hop.resolve_right hn
 
 end PEqualNP.Outside.L_meta_3457_shadow
