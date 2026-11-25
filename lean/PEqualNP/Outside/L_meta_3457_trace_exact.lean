@@ -155,7 +155,8 @@ theorem mixed_clean_iff_trace_subset (N : ℕ) (I : Fin N → Fin N → Prop)
     have hf := h j hj hop p l hn
     change (C.gates.foldl step (doubleRow (Fin.castAdd N p) (Fin.natAdd N l))).getD
       (N+N+j) false = false at hf
-    simp only [doubleRow, List.length_ofFn] at hv
+    have hw : (doubleRow (Fin.castAdd N p) (Fin.natAdd N l)).length = N+N := by simp [doubleRow]
+    rw [hw] at hv
     rw [hv] at hf
     cases hf
   · intro h j hj hop p l hn
