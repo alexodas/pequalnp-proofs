@@ -1,9 +1,9 @@
 # Fork-only. Never include this workflow in a proof PR to open-goat/pequalnp-proofs.
 # Rechecks the public desk every 20 minutes until a *new* gap is assigned;
-# skips and immediately releases the three previously researched gaps.
+# skips and immediately releases previously researched gaps and steps tagged 'False:'.
 # All other assignments are kept alive with periodic heartbeat.
 # then renews that same gap, without exceeding one job's 6-hour limit.
-name: PEqualNP new gap (skip previous) + long keeper
+name: PEqualNP new gap (skip prior/False) + long keeper
 
 on:
   workflow_dispatch:
@@ -135,7 +135,7 @@ jobs:
                       raise SystemExit('Malformed lease identifier')
 
                   # Exclude all previously researched gaps, then seek a different one.
-                  if gid in ('L-meta-969', 'L-meta-12017', 'L-meta-11033'):
+                  if gid in ('L-meta-969', 'L-meta-12017', 'L-meta-11033', 'L-meta-13808') or str(gap.get('title', '')).startswith('False:'):
                       from urllib.parse import urlencode
                       release_url = 'https://pequalnp.com/desk/release?' + urlencode(
                           {'lease': lease['id'], 'reason': 'other'})
