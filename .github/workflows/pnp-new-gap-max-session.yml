@@ -206,7 +206,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-      - name: Renew the lease every 8 minutes and release before session deadline
+      - name: Renew the lease every 5 minutes and release before session deadline
         if: steps.claim.outputs.assigned == 'true'
         shell: bash
         run: |
