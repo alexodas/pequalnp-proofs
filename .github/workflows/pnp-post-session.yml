@@ -101,6 +101,7 @@ jobs:
           # Waiting for the desk therefore never causes a 355+300 minute job.
           (private / 'session_deadline.txt').write_text(str(start + duration * 60))
           attempt = 0
+          released_expired_id = None
           print('Waiting budget:', max_wait, 'minutes; total job session:', duration, 'minutes', flush=True)
           while True:
               check_stop()
@@ -149,6 +150,50 @@ jobs:
                       raise SystemExit('Invalid import list')
                   if not isinstance(lease.get('id'), str) or not lease['id']:
                       raise SystemExit('Malformed lease identifier')
+
+                  # A returned lease can be an existing lease, already at its absolute six-hour cap.
+                  # Validate it before publishing the assignment. Follow the desk's explicit
+                  # release-and-ask-again instruction once, never retry an invalid heartbeat.
+                  from urllib.parse import urlencode
+                  def lease_post(endpoint, params):
+                      out = private / 'lease-reply.json'
+                      res = subprocess.run(
+                          ['curl', '--silent', '--show-error', '--proto', '=https',
+                           '--max-redirs', '0', '--connect-timeout', '15', '--max-time', '40',
+                           '--request', 'POST', '--output', str(out), '--write-out', '%{http_code}',
+                           'https://pequalnp.com/desk/' + endpoint + '?' + urlencode(params)],
+                          text=True, capture_output=True)
+                      if res.returncode != 0:
+                          raise SystemExit('Lease request transport failed; stopping')
+                      return res.stdout.strip(), json.loads(out.read_text(encoding='utf-8'))
+                  if lease['id'] == released_expired_id:
+                      raise SystemExit('Desk returned the already released lease; stopping')
+                  check_stop()
+                  beat_code, beat_reply = lease_post('beat', {'lease': lease['id']})
+                  if beat_code == '410':
+                      reason = str(beat_reply.get('error') or beat_reply.get('say') or '')
+                      if (released_expired_id is None and beat_reply.get('withdrawn') is not True
+                          and reason.strip().lower().rstrip('.') ==
+                              'a lease lasts six hours at most; release it and ask again'):
+                          rel_code, _ = lease_post('release',
+                              {'lease': lease['id'], 'reason': 'out_of_time'})
+                          print('Six-hour cap reached; release HTTP', rel_code, flush=True)
+                          if not rel_code.isdigit() or not 200 <= int(rel_code) < 300:
+                              raise SystemExit('Release not confirmed; no new claim')
+                          released_expired_id = lease['id']
+                          print('Old lease released. Asking the desk once for a fresh assignment.', flush=True)
+                          time.sleep(5)
+                          continue
+                      raise SystemExit('STOP: lease invalid; no further heartbeat')
+                  if beat_code != '200' or not isinstance(beat_reply.get('lease'), dict):
+                      raise SystemExit('Initial lease validation failed (HTTP ' + beat_code + ')')
+                  updated = beat_reply['lease']
+                  if updated.get('id') not in (None, lease['id']):
+                      raise SystemExit('Unexpected changed lease identifier; stopping')
+                  if not updated.get('expires_at'):
+                      raise SystemExit('Initial heartbeat lacks expiration')
+                  lease.update(updated)
+                  print('Initial POST accepted; expiration:', lease['expires_at'], flush=True)
 
                   (private / 'assignment.json').write_text(json.dumps(data), encoding='utf-8')
                   safe = {k: data[k] for k in ('gap', 'shard', 'shards') if k in data}
