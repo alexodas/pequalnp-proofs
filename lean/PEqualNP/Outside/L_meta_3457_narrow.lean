@@ -115,4 +115,27 @@ theorem narrow_operand_progress (N : ℕ) (I : Fin N → Fin N → Prop)
         · exact False.elim (havoid.2 he)
     simp [hk]
 
+
+/-- In a least-dirty representative, every dirty pair contains
+    each mandatory critical endpoint that is accepted by the
+    first operand on its singleton row. -/
+theorem minimal_dirty_contains_mandatory (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (h : Admissible N I C)
+    (hmin : ∀ D : Circuit, Admissible N I D → D.size ≤ C.size →
+      (dirtySites N I C).card ≤ (dirtySites N I D).card)
+    (j a b : ℕ) (p₀ l₀ : Fin N) (k : Fin (N+N))
+    (hd : (j,p₀,l₀) ∈ dirtySites N I C)
+    (hab : (atGate C.gates j).inputs = [a,b])
+    (ha : ((C.gates.take j).foldl step (singletonRow k)).getD a false = true)
+    (hmandatory : ∀ p l, CriticalPair N I C j p l →
+      k = Fin.castAdd N p ∨ k = Fin.natAdd N l) :
+    k = Fin.castAdd N p₀ ∨ k = Fin.natAdd N l₀ := by
+  classical
+  by_contra hn
+  have hav : k ≠ Fin.castAdd N p₀ ∧ k ≠ Fin.natAdd N l₀ :=
+    ⟨fun he => hn (Or.inl he),fun he => hn (Or.inr he)⟩
+  obtain ⟨D,hD,hs,hlt⟩ :=
+    narrow_operand_progress N I C j a b p₀ l₀ k h hd hab ha hmandatory hav
+  exact (Nat.not_lt_of_ge (hmin D hD hs)) hlt
+
 end PEqualNP.Outside.L_meta_3457_narrow
