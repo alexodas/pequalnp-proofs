@@ -83,11 +83,20 @@ theorem or_and_budget_le (n : ℕ) (C : Circuit) :
     cases he
   have h1 := Finset.card_le_card hsub
   have h2 : (B.image (fun j => n+j.val)).card ≤ B.card := Finset.card_image_le
+  have hdis : Disjoint (andIndices C) B := by
+    apply Finset.disjoint_left.mpr
+    intro j ha hb
+    have ha' : (atGate C.gates j.val).op = GateOp.and := (Finset.mem_filter.mp ha).2
+    have hb' : ¬ (atGate C.gates j.val).op = GateOp.and := (Finset.mem_filter.mp hb).2
+    exact hb' ha'
+  have hu : andIndices C ∪ B = Finset.univ := by
+    ext j
+    simp only [Finset.mem_union,Finset.mem_univ,iff_true]
+    by_cases hj : (atGate C.gates j.val).op = GateOp.and
+    · exact Or.inl (Finset.mem_filter.mpr ⟨Finset.mem_univ _,hj⟩)
+    · exact Or.inr (Finset.mem_filter.mpr ⟨Finset.mem_univ _,hj⟩)
   have h3 : (andIndices C).card + B.card = C.gates.length := by
-    simpa [andIndices,B] using
-      (Finset.card_filter_add_card_filter_not
-        (s := (Finset.univ : Finset (Fin C.gates.length)))
-        (fun j => (atGate C.gates j.val).op = GateOp.and))
+    rw [← Finset.card_union_of_disjoint hdis,hu,Finset.card_univ,Fintype.card_fin]
   change A.card + (andIndices C).card ≤ C.gates.length
   omega
 
