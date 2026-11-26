@@ -129,7 +129,7 @@ theorem replace_preserves_positive (N : ℕ) (I : Fin N → Fin N → Prop)
 
 /-- A one-slot replacement of an AND with a lower, clean AND
     that retains all its critical pairs is an admissible strict step. -/
-theorem replace_progress (N : ℕ) (I : Fin N → Fin N → Prop)
+theorem replace_progress_at (N : ℕ) (I : Fin N → Fin N → Prop)
     (C : Circuit) (j : ℕ) (r : Gate) (p₀ l₀ : Fin N)
     (h : Admissible N I C) (hd : (j,p₀,l₀) ∈ dirtySites N I C)
     (hop : r.op = GateOp.and) (hlen : r.inputs.length ≤ 2)
@@ -139,8 +139,8 @@ theorem replace_progress (N : ℕ) (I : Fin N → Fin N → Prop)
         preValue (C.gates.take j) (atGate C.gates j) w = true)
     (hcrit : ∀ p l : Fin N, CriticalPair N I C j p l →
       preValue (C.gates.take j) r (doubleRow (Fin.castAdd N p) (Fin.natAdd N l)) = true)
-    (hclean : ∀ p l : Fin N, ¬ I p l →
-      preValue (C.gates.take j) r (doubleRow (Fin.castAdd N p) (Fin.natAdd N l)) = false) :
+    (hclean : preValue (C.gates.take j) r
+      (doubleRow (Fin.castAdd N p₀) (Fin.natAdd N l₀)) = false) :
     ∃ D : Circuit, Admissible N I D ∧ D.size ≤ C.size ∧
       (dirtySites N I D).card < (dirtySites N I C).card := by
   obtain ⟨hj,hn,hjop,hval⟩ := (mem_dirtySites N I C j p₀ l₀).mp hd
@@ -187,9 +187,27 @@ theorem replace_progress (N : ℕ) (I : Fin N → Fin N → Prop)
     change ((replaceGate C j r).wires w).getD (N+N+j) false = true at hv
     have he := replace_slot_value C j r hj w
     rw [hw] at he
-    rw [he,hclean p₀ l₀ hn] at hv
+    rw [he,hclean] at hv
     cases hv
   refine ⟨D,⟨hm,hr,hf,hs⟩,le_of_eq (replace_size C j r),?_⟩
   exact Finset.card_lt_card ⟨hsub,fun hback => hnot (hback hd)⟩
+
+/-- Full cleaning is sufficient, but eliminating one dirty site is enough. -/
+theorem replace_progress (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (j : ℕ) (r : Gate) (p₀ l₀ : Fin N)
+    (h : Admissible N I C) (hd : (j,p₀,l₀) ∈ dirtySites N I C)
+    (hop : r.op = GateOp.and) (hlen : r.inputs.length ≤ 2)
+    (hback : ∀ i ∈ r.inputs, i < N+N+j)
+    (hlower : ∀ w : List Bool, w.length = N+N →
+      preValue (C.gates.take j) r w = true →
+        preValue (C.gates.take j) (atGate C.gates j) w = true)
+    (hcrit : ∀ p l : Fin N, CriticalPair N I C j p l →
+      preValue (C.gates.take j) r (doubleRow (Fin.castAdd N p) (Fin.natAdd N l)) = true)
+    (hclean : ∀ p l : Fin N, ¬ I p l →
+      preValue (C.gates.take j) r (doubleRow (Fin.castAdd N p) (Fin.natAdd N l)) = false) :
+    ∃ D : Circuit, Admissible N I D ∧ D.size ≤ C.size ∧
+      (dirtySites N I D).card < (dirtySites N I C).card := by
+  exact replace_progress_at N I C j r p₀ l₀ h hd hop hlen hback hlower hcrit
+    (hclean p₀ l₀ ((mem_dirtySites N I C j p₀ l₀).mp hd).2.1)
 
 end PEqualNP.Outside.L_meta_3457_replace
