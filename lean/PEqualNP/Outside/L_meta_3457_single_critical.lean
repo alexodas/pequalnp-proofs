@@ -127,7 +127,7 @@ theorem unique_critical_progress (N : ℕ) (I : Fin N → Fin N → Prop)
   apply replace_progress N I C j r p₀ l₀ h hd rfl (by simp [r,inputAnd])
   · intro i hi
     change i ∈ [a.val,b.val] at hi
-    simp only [List.mem_cons,List.mem_singleton] at hi
+    simp only [List.mem_cons,List.not_mem_nil,or_false] at hi
     rcases hi with rfl | rfl
     · have hh := a.isLt
       omega
@@ -143,5 +143,46 @@ theorem unique_critical_progress (N : ℕ) (I : Fin N → Fin N → Prop)
     exact input_and_pair_true _ a b
   · intro q m hn
     exact input_and_clean N I _ p l hc.1 q m hn
+
+
+def MultiCritical (N : ℕ) (I : Fin N → Fin N → Prop) (C : Circuit) (j : ℕ) : Prop :=
+  ∃ p l q m : Fin N, CriticalPair N I C j p l ∧
+    CriticalPair N I C j q m ∧ (p ≠ q ∨ l ≠ m)
+
+/-- Every dirty gate in a least-dirty representative must be
+    critical for at least two different incidence pairs. -/
+theorem reduce_to_multi_critical (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (h : Admissible N I C) :
+    ∃ D : Circuit, Admissible N I D ∧ D.size ≤ C.size ∧
+      ∀ j p l, (j,p,l) ∈ dirtySites N I D → MultiCritical N I D j := by
+  classical
+  let P := fun k : ℕ => ∃ D : Circuit, Admissible N I D ∧ D.size ≤ C.size ∧
+    (dirtySites N I D).card = k
+  have hex : ∃ k, P k := ⟨_,C,h,le_rfl,rfl⟩
+  obtain ⟨D,hD,hsize,hmin⟩ := Nat.find_spec hex
+  refine ⟨D,hD,hsize,?_⟩
+  intro j p₀ l₀ hd
+  have hc : Critical N I D j := by
+    by_contra hn
+    have he := suppress_admissible N I D j hD hn
+    have hs : (suppress D j).size ≤ C.size := by rw [suppress_size]; exact hsize
+    have hp : P (dirtySites N I (suppress D j)).card := ⟨_,he,hs,rfl⟩
+    have hle := Nat.find_min' hex hp
+    have hlt := suppression_dirty_decreases N I D j hD.1 p₀ l₀ hd
+    omega
+  obtain ⟨p,l,hi,hzero⟩ := hc
+  have hc' : CriticalPair N I D j p l := ⟨hi,hzero⟩
+  by_contra hnone
+  have hu : ∀ q m, CriticalPair N I D j q m → q = p ∧ m = l := by
+    intro q m hh
+    constructor
+    · by_contra hn
+      exact hnone ⟨p,l,q,m,hc',hh,Or.inl (Ne.symm hn)⟩
+    · by_contra hn
+      exact hnone ⟨p,l,q,m,hc',hh,Or.inr (Ne.symm hn)⟩
+  obtain ⟨E,hE,he,hlt⟩ := unique_critical_progress N I D j p₀ l₀ p l hD hd hc' hu
+  have hp : P (dirtySites N I E).card := ⟨E,hE,le_trans he hsize,rfl⟩
+  have hle := Nat.find_min' hex hp
+  omega
 
 end PEqualNP.Outside.L_meta_3457_single_critical
