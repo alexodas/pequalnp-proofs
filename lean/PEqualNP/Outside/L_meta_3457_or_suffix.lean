@@ -96,7 +96,8 @@ theorem slot_or_suffix_forces (pre post : List Gate) (g : Gate) (o : ℕ)
     (ho : OrOnly post)
     (hu : Sensitive pre post o u) (hv : preValue pre g v = true) :
     (slot pre post g o).eval v = true := by
-  rw [slot_eval_mux, hv, if_true]
+  rw [slot_eval_mux, hv]
+  change high pre post o v = true
   exact or_suffix_transfer post (pre.foldl step u) (pre.foldl step v) o ho
     (by simp only [fold_length,hlen]) hu.1 hu.2
 

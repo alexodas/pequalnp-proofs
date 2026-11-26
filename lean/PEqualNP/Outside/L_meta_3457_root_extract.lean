@@ -105,8 +105,8 @@ theorem full_support_test (N : ℕ) (C : Circuit) (hr : ReadsBack (N+N) C)
     gateTest (C.gates.take j) (atGate C.gates j)
       (doubleRow (Fin.castAdd N p) (Fin.natAdd N l)) = true ↔
       (p ∈ PS N C a ∧ l ∈ LS N C b) ∨ (p ∈ PS N C b ∧ l ∈ LS N C a) := by
-  have ha : a < N+N+j := hr j hj a (by simp [hab])
-  have hb : b < N+N+j := hr j hj b (by simp [hab])
+  have ha : a < N+N+j := hr j hj a (by change _ ∈ (atGate C.gates _).inputs; rw [hab]; simp)
+  have hb : b < N+N+j := hr j hj b (by change _ ∈ (atGate C.gates _).inputs; rw [hab]; simp)
   have hread : ∀ k : Fin (N+N), ∀ i < N+N+j,
       shadowRead C.gates (singletonRow k) i =
         shadowRead (C.gates.take j) (singletonRow k) i := by
@@ -160,10 +160,10 @@ theorem gate_roots (N : ℕ) (I : Fin N → Fin N → Prop)
       (hm _ (gate_mem C j.val j.isLt)).2
       (Fin.castAdd N p) (Fin.natAdd N l) (hS _) (hS _) hpl
     have ha : a < N+N+C.gates.length := by
-      have hh := hr j.val j.isLt a (by simp [hab])
+      have hh := hr j.val j.isLt a (by change _ ∈ (atGate C.gates _).inputs; rw [hab]; simp)
       omega
     have hb : b < N+N+C.gates.length := by
-      have hh := hr j.val j.isLt b (by simp [hab])
+      have hh := hr j.val j.isLt b (by change _ ∈ (atGate C.gates _).inputs; rw [hab]; simp)
       omega
     have ht := full_support_test N C hr j.val j.isLt hop a b hab
     obtain ⟨A,hA,hAv,hAc⟩ := oriented_rectangle_root N I hf C a b ha hb

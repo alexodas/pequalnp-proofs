@@ -174,7 +174,8 @@ theorem critical_slot_filter (pre post : List Gate) (g : Gate) (o : ℕ)
       ((pre.foldl step u) ++ [false]) ((pre.foldl step v) ++ [true]) :=
     initial_no_cross _ _ (by simp only [fold_length,hlen])
   have hV : high pre post o v = false := by
-    rw [slot_eval_mux,hdirty,if_true] at hnegative
+    rw [slot_eval_mux,hdirty] at hnegative
+    change high pre post o v = false at hnegative
     exact hnegative
   exact crossing_exists post _ _ _ hm hn o ⟨hs.2,hs.1,hV⟩
 
