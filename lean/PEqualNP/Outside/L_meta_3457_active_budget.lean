@@ -264,7 +264,8 @@ theorem disjoint_stars_exact_size (N : ℕ) (I : Fin N → Fin N → Prop)
     Finset.card_image_of_injective _ Fin.val_injective] at he
   by_cases hempty : own = []
   · subst own
-    simp [coverCircuitB,coverGatesB,Circuit.size] at *
+    simp [coverCircuitB,coverGatesB,Circuit.size] at he ⊢
+    omega
   · have hsize := PEqualNP.MetaComplexity.Helpers.CoverCircB.circuit_size (N+N) own hempty hne
     omega
 
