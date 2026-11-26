@@ -68,8 +68,15 @@ jobs:
             modules+=(PEqualNP)
           fi
           cd lean
+          failures=()
           for module in "${modules[@]}"; do
             echo "::group::lake build $module"
-            lake build "$module"
+            if ! lake build "$module"; then
+              failures+=("$module")
+            fi
             echo "::endgroup::"
           done
+          if (( ${#failures[@]} > 0 )); then
+            printf 'Failed module: %s\n' "${failures[@]}"
+            exit 1
+          fi
