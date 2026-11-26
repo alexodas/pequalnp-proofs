@@ -46,7 +46,7 @@ theorem at_map_shadow (gs : List Gate) (j : ℕ) (hj : j < gs.length) :
 theorem shadow_prefix_eq (gs : List Gate) (w : List Bool) (j i : ℕ)
     (hi : i < w.length + (gs.take j).length) :
     shadowRead gs w i = shadowRead (gs.take j) w i := by
-  simp only [shadowRead, shadow_fold_map, List.take_map]
+  simp only [shadowRead, shadow_fold_map, List.map_take]
   exact prefix_wire_eq (gs.map eraseNonOr) w j i (by simpa [List.length_take] using hi)
 
 theorem shadow_input_eq (gs : List Gate) (w : List Bool) (i : ℕ)
@@ -72,7 +72,7 @@ theorem shadow_gate_eval (gs : List Gate) (w : List Bool) (j : ℕ)
   simp only [shadowRead, shadow_fold_map]
   rw [wire_at_gate (gs.map eraseNonOr) w j (by simpa using hj), at_map_shadow gs j hj]
   by_cases ho : (atGate gs j).op = GateOp.or
-  · simp [eraseNonOr, ho, GateOp.eval, List.take_map, Function.comp_def]
+  · simp [eraseNonOr, ho, GateOp.eval, List.map_take, Function.comp_def]
   · simp [eraseNonOr, ho, zeroGate, GateOp.eval]
 
 def support {n m : ℕ} (C : Circuit) (e : Fin m → Fin n) (i : ℕ) : Finset (Fin m) :=
@@ -111,7 +111,9 @@ theorem support_nonor_empty {n m : ℕ} (C : Circuit) (e : Fin m → Fin n)
   intro k hk
   rw [mem_support] at hk
   have hw : (singletonRow (e k)).length = n := by simp [singletonRow]
-  rw [← hw, shadow_gate_eval C.gates _ j hj, if_neg ho] at hk
+  have he := shadow_gate_eval C.gates (singletonRow (e k)) j hj
+  rw [hw, if_neg ho] at he
+  rw [he] at hk
   cases hk
 
 theorem support_or_spec {n m : ℕ} (C : Circuit) (e : Fin m → Fin n)
@@ -123,7 +125,9 @@ theorem support_or_spec {n m : ℕ} (C : Circuit) (e : Fin m → Fin n)
   have hw : (singletonRow (e k)).length = n := by simp [singletonRow]
   have he : shadowRead C.gates (singletonRow (e k)) (n+j) =
       (atGate C.gates j).inputs.any (fun i => shadowRead (C.gates.take j) (singletonRow (e k)) i) := by
-    rw [← hw, shadow_gate_eval C.gates _ j hj, if_pos ho]
+    have he := shadow_gate_eval C.gates (singletonRow (e k)) j hj
+    rw [hw, if_pos ho] at he
+    exact he
   rw [he, List.any_eq_true]
   have hp : ∀ i ∈ (atGate C.gates j).inputs,
       shadowRead C.gates (singletonRow (e k)) i =
