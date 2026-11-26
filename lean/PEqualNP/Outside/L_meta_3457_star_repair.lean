@@ -94,4 +94,68 @@ theorem point_star_repair (N : ℕ) (I : Fin N → Fin N → Prop)
         omega
       exact False.elim (hn (ep ▸ el ▸ hc.1))
 
+
+/-- The symmetric repair, for a line-centred star. -/
+theorem line_star_repair (N : ℕ) (I : Fin N → Fin N → Prop)
+    (C : Circuit) (j s : ℕ) (p₀ l₀ l : Fin N)
+    (h : Admissible N I C) (hd : (j,p₀,l₀) ∈ dirtySites N I C)
+    (hs : s < N+N+j)
+    (hstar : ∀ p m, CriticalPair N I C j p m → m = l)
+    (hwire : ∀ w : List Bool, w.length = N+N →
+      ((C.gates.take j).foldl step w).getD s false = true ↔
+        ∃ p : Fin N, CriticalPair N I C j p l ∧
+          w.getD (Fin.castAdd N p).val false = true) :
+    ∃ D : Circuit, Admissible N I D ∧ D.size ≤ C.size ∧
+      (dirtySites N I D).card < (dirtySites N I C).card := by
+  have hj := ((mem_dirtySites N I C j p₀ l₀).mp hd).1
+  let b := Fin.natAdd N l
+  let r := wireAnd b.val s
+  have he : ∀ w : List Bool, w.length = N+N →
+      (preValue (C.gates.take j) r w = true ↔
+        w.getD b.val false = true ∧
+          ∃ p : Fin N, CriticalPair N I C j p l ∧
+            w.getD (Fin.castAdd N p).val false = true) := by
+    intro w hw
+    have hb : b.val < w.length := by rw [hw]; exact b.isLt
+    rw [wireAnd_value,fold_keep _ _ hb,Bool.and_eq_true,hwire w hw]
+  apply replace_progress N I C j r p₀ l₀ h hd rfl (by simp [r,wireAnd])
+  · intro i hi
+    change i ∈ [b.val,s] at hi
+    simp only [List.mem_cons,List.not_mem_nil,or_false] at hi
+    rcases hi with rfl | rfl
+    · have hb := b.isLt
+      omega
+    · exact hs
+  · intro w hw hv
+    obtain ⟨hl,p,hc,hp⟩ := (he w hw).mp hv
+    exact original_slot_mono C j hj h.1 _ _
+      (pair_below_list (Fin.castAdd N p) b w hw hp hl)
+      (critical_pair_slot_true N I C j hj h p l hc)
+  · intro p m hc
+    have eq := hstar p m hc
+    subst m
+    let w := doubleRow (Fin.castAdd N p) b
+    apply (he w (by simp [w,doubleRow])).mpr
+    exact ⟨(double_read _ b b).mpr (Or.inr rfl),
+      p,hc,(double_read _ b _).mpr (Or.inl rfl)⟩
+  · intro q m hn
+    let w := doubleRow (Fin.castAdd N q) (Fin.natAdd N m)
+    cases hv : preValue (C.gates.take j) r w with
+    | false => rfl
+    | true =>
+      obtain ⟨hl,p,hc,hp⟩ := (he w (by simp [w,doubleRow])).mp hv
+      have hp' := (double_read (Fin.castAdd N q) (Fin.natAdd N m) (Fin.castAdd N p)).mp hp
+      have hl' := (double_read (Fin.castAdd N q) (Fin.natAdd N m) b).mp hl
+      have ep : p = q := by
+        apply Fin.ext
+        exact congrArg (fun k : Fin (N+N) => k.val)
+          (hp'.resolve_right (point_line_distinct N p m))
+      have el : l = m := by
+        apply Fin.ext
+        have hh := congrArg (fun k : Fin (N+N) => k.val)
+          (hl'.resolve_left (Ne.symm (point_line_distinct N q l)))
+        simp only [Fin.val_natAdd] at hh
+        omega
+      exact False.elim (hn (ep ▸ el ▸ hc.1))
+
 end PEqualNP.Outside.L_meta_3457_star_repair
