@@ -1,5 +1,6 @@
 import PEqualNP.Outside.L_meta_3457_cover_cut
 import PEqualNP.MetaComplexity.Helpers.Support
+import PEqualNP.Outside.L_meta_3457_main_cut
 
 /-!
 An input-dependence budget for arbitrary incidence graphs.
@@ -128,5 +129,103 @@ theorem disjoint_block_budget (N : ℕ) (I : Fin N → Fin N → Prop)
   have hb := active_vertices_budget N I C hm hfun
   have hsize := PEqualNP.MetaComplexity.Helpers.CoverCircB.circuit_size (N+N) own hne hblocks
   omega
+
+
+def BlocksSound (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) : Prop :=
+  ∀ b ∈ own, ∀ u ∈ b.2, ∃ p l : Fin N, I p l ∧
+    ((b.1 = (Fin.castAdd N p).val ∧ u = (Fin.natAdd N l).val) ∨
+     (b.1 = (Fin.natAdd N l).val ∧ u = (Fin.castAdd N p).val))
+
+def BlocksComplete (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) : Prop :=
+  ∀ p l : Fin N, I p l → ∃ b ∈ own,
+    (b.1 = (Fin.castAdd N p).val ∧ (Fin.natAdd N l).val ∈ b.2) ∨
+    (b.1 = (Fin.natAdd N l).val ∧ (Fin.castAdd N p).val ∈ b.2)
+
+theorem getD_input {n : ℕ} (z : Fin n → Bool) (k : Fin n) :
+    (List.ofFn z).getD k.val false = z k := by
+  simp [List.getD_eq_getElem?_getD,k.isLt]
+
+theorem sound_blocks_in_range (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) (hs : BlocksSound N I own)
+    (hne : ∀ b ∈ own, b.2 ≠ []) :
+    ∀ b ∈ own, b.1 < N+N ∧ ∀ u ∈ b.2, u < N+N := by
+  intro b hb
+  obtain ⟨u,hu⟩ := List.exists_mem_of_ne_nil b.2 (hne b hb)
+  constructor
+  · obtain ⟨p,l,_,hor⟩ := hs b hb u hu
+    rcases hor with ⟨he,_⟩ | ⟨he,_⟩
+    · rw [he]; exact (Fin.castAdd N p).isLt
+    · rw [he]; exact (Fin.natAdd N l).isLt
+  · intro v hv
+    obtain ⟨p,l,_,hor⟩ := hs b hb v hv
+    rcases hor with ⟨_,he⟩ | ⟨_,he⟩
+    · rw [he]; exact (Fin.natAdd N l).isLt
+    · rw [he]; exact (Fin.castAdd N p).isLt
+
+theorem sound_blocks_active (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) (hs : BlocksSound N I own)
+    (hne : ∀ b ∈ own, b.2 ≠ []) :
+    ∀ t ∈ blockVertices own, ∃ i ∈ activeVertices N I, i.val = t := by
+  classical
+  intro t ht
+  obtain ⟨b,hb,ht⟩ := List.mem_flatMap.mp ht
+  rcases List.mem_cons.mp ht with h | ht
+  · obtain ⟨u,hu⟩ := List.exists_mem_of_ne_nil b.2 (hne b hb)
+    obtain ⟨p,l,hi,hor⟩ := hs b hb u hu
+    rcases hor with ⟨he,_⟩ | ⟨he,_⟩
+    · exact ⟨Fin.castAdd N p,Finset.mem_filter.mpr
+        ⟨Finset.mem_univ _,p,l,hi,Or.inl rfl⟩,he.symm.trans h.symm⟩
+    · exact ⟨Fin.natAdd N l,Finset.mem_filter.mpr
+        ⟨Finset.mem_univ _,p,l,hi,Or.inr rfl⟩,he.symm.trans h.symm⟩
+  · obtain ⟨p,l,hi,hor⟩ := hs b hb t ht
+    rcases hor with ⟨_,he⟩ | ⟨_,he⟩
+    · exact ⟨Fin.natAdd N l,Finset.mem_filter.mpr
+        ⟨Finset.mem_univ _,p,l,hi,Or.inr rfl⟩,he.symm⟩
+    · exact ⟨Fin.castAdd N p,Finset.mem_filter.mpr
+        ⟨Finset.mem_univ _,p,l,hi,Or.inl rfl⟩,he.symm⟩
+
+theorem blocks_compute (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) (hs : BlocksSound N I own)
+    (hc : BlocksComplete N I own) (hne : ∀ b ∈ own, b.2 ≠ [])
+    (z : Fin (N+N) → Bool) :
+    (coverCircuitB (N+N) own).eval (List.ofFn z) = true ↔
+      ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧ z (Fin.natAdd N l) = true := by
+  rw [PEqualNP.MetaComplexity.Helpers.CoverCircB.circuit_fun _ _ (sound_blocks_in_range N I own hs hne)]
+  constructor
+  · rintro ⟨b,hb,hv,u,hu,hw⟩
+    obtain ⟨p,l,hi,hor⟩ := hs b hb u hu
+    refine ⟨p,l,hi,?_⟩
+    rcases hor with ⟨he,hf⟩ | ⟨he,hf⟩
+    · rw [he,getD_input] at hv
+      rw [hf,getD_input] at hw
+      exact ⟨hv,hw⟩
+    · rw [he,getD_input] at hv
+      rw [hf,getD_input] at hw
+      exact ⟨hw,hv⟩
+  · rintro ⟨p,l,hi,hp,hl⟩
+    obtain ⟨b,hb,hor⟩ := hc p l hi
+    rcases hor with ⟨he,hm⟩ | ⟨he,hm⟩
+    · exact ⟨b,hb,by rw [he,getD_input]; exact hp,_,hm,by rw [getD_input]; exact hl⟩
+    · exact ⟨b,hb,by rw [he,getD_input]; exact hl,_,hm,by rw [getD_input]; exact hp⟩
+
+/-- The exact assigned normalization holds for incidence relations
+    given as vertex-disjoint nonempty star blocks (including the
+    empty relation). No singleton-safety premise on C is needed. -/
+theorem disjoint_stars_normalize (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) (hs : BlocksSound N I own)
+    (hc : BlocksComplete N I own) (hne : ∀ b ∈ own, b.2 ≠ [])
+    (hdis : (blockVertices own).Nodup) :
+    PEqualNP.Outside.L_meta_3457_main_cut.Normalize N I := by
+  intro C hm hr hf hsingle
+  have hbudget : (coverCircuitB (N+N) own).size ≤ C.size := by
+    by_cases he : own = []
+    · subst own
+      simp [coverCircuitB,coverGatesB,Circuit.size]
+    · exact disjoint_block_budget N I C hm hf own he hne hdis
+        (sound_blocks_active N I own hs hne)
+  exact normalization_of_cover_budget N I C own
+    (sound_blocks_in_range N I own hs hne) hbudget (blocks_compute N I own hs hc hne)
 
 end PEqualNP.Outside.L_meta_3457_active_budget
