@@ -228,4 +228,44 @@ theorem disjoint_stars_normalize (N : ℕ) (I : Fin N → Fin N → Prop)
   exact normalization_of_cover_budget N I C own
     (sound_blocks_in_range N I own hs hne) hbudget (blocks_compute N I own hs hc hne)
 
+
+theorem blocks_cover_all_active (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) (hs : BlocksSound N I own)
+    (hc : BlocksComplete N I own) (hne : ∀ b ∈ own, b.2 ≠ []) :
+    (blockVertices own).toFinset = (activeVertices N I).image Fin.val := by
+  classical
+  apply Finset.Subset.antisymm
+  · intro t ht
+    obtain ⟨i,hi,he⟩ := sound_blocks_active N I own hs hne t (List.mem_toFinset.mp ht)
+    exact Finset.mem_image.mpr ⟨i,hi,he⟩
+  · intro t ht
+    obtain ⟨i,hi,rfl⟩ := Finset.mem_image.mp ht
+    obtain ⟨p,l,hI,hor⟩ := (Finset.mem_filter.mp hi).2
+    obtain ⟨b,hb,hblock⟩ := hc p l hI
+    apply List.mem_toFinset.mpr
+    apply List.mem_flatMap.mpr
+    refine ⟨b,hb,?_⟩
+    rcases hor with rfl | rfl <;> rcases hblock with ⟨he,hm⟩ | ⟨he,hm⟩
+    · exact List.mem_cons.mpr (Or.inl he.symm)
+    · exact List.mem_cons.mpr (Or.inr hm)
+    · exact List.mem_cons.mpr (Or.inr hm)
+    · exact List.mem_cons.mpr (Or.inl he.symm)
+
+/-- The clean cover attains the universal dependence lower bound.
+    This includes the empty incidence relation, with zero gates. -/
+theorem disjoint_stars_exact_size (N : ℕ) (I : Fin N → Fin N → Prop)
+    (own : List (ℕ × List ℕ)) (hs : BlocksSound N I own)
+    (hc : BlocksComplete N I own) (hne : ∀ b ∈ own, b.2 ≠ [])
+    (hdis : (blockVertices own).Nodup) :
+    (coverCircuitB (N+N) own).size = (activeVertices N I).card - 1 := by
+  classical
+  have he := congrArg Finset.card (blocks_cover_all_active N I own hs hc hne)
+  rw [List.toFinset_card_of_nodup hdis,block_vertices_length,
+    Finset.card_image_of_injective _ Fin.val_injective] at he
+  by_cases hempty : own = []
+  · subst own
+    simp [coverCircuitB,coverGatesB,Circuit.size] at *
+  · have hsize := PEqualNP.MetaComplexity.Helpers.CoverCircB.circuit_size (N+N) own hempty hne
+    omega
+
 end PEqualNP.Outside.L_meta_3457_active_budget
