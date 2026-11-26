@@ -86,7 +86,14 @@ theorem replace_wires_below (C : Circuit) (j : ℕ) (r : Gate)
     (h : preValue (C.gates.take j) r w = true →
       preValue (C.gates.take j) (atGate C.gates j) w = true) :
     Below ((replaceGate C j r).wires w) (C.wires w) := by
-  rw [replace_as_slot C j r hj, ← circuit_as_slot C j hj, slot_wires, slot_wires]
+  have hw : C.wires w = (C.gates.drop (j+1)).foldl step
+      ((C.gates.take j).foldl step w ++ [preValue (C.gates.take j) (atGate C.gates j) w]) := by
+    calc
+      C.wires w = (slot (C.gates.take j) (C.gates.drop (j+1))
+          (atGate C.gates j) C.output).wires w :=
+        congrArg (fun D : Circuit => D.wires w) (circuit_as_slot C j hj).symm
+      _ = _ := slot_wires _ _ _ _ _
+  rw [replace_as_slot C j r hj,slot_wires,hw]
   exact fold_below _ _ _ (below_snoc _ _ _ _ (below_refl _) h) (suffix_mono C hm j)
 
 theorem replace_slot_value (C : Circuit) (j : ℕ) (r : Gate)
