@@ -86,14 +86,15 @@ theorem or_and_budget_le (n : ℕ) (C : Circuit) :
   have hdis : Disjoint (andIndices C) B := by
     apply Finset.disjoint_left.mpr
     intro j ha hb
-    have ha' : (atGate C.gates j.val).op = GateOp.and := (Finset.mem_filter.mp ha).2
+    have ha' : (atGate C.gates j.val).op = GateOp.and := by
+      simpa [andIndices] using ha
     have hb' : ¬ (atGate C.gates j.val).op = GateOp.and := (Finset.mem_filter.mp hb).2
     exact hb' ha'
   have hu : andIndices C ∪ B = Finset.univ := by
     ext j
     simp only [Finset.mem_union,Finset.mem_univ,iff_true]
     by_cases hj : (atGate C.gates j.val).op = GateOp.and
-    · exact Or.inl (Finset.mem_filter.mpr ⟨Finset.mem_univ _,hj⟩)
+    · exact Or.inl (by simpa [andIndices] using hj)
     · exact Or.inr (Finset.mem_filter.mpr ⟨Finset.mem_univ _,hj⟩)
   have h3 : (andIndices C).card + B.card = C.gates.length := by
     rw [← Finset.card_union_of_disjoint hdis,hu,Finset.card_univ,Fintype.card_fin]
